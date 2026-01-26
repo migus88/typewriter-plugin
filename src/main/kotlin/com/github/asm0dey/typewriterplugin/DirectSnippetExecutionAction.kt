@@ -69,7 +69,7 @@ class RegisterSnippetShortcutsAction {
 class DirectSnippetExecutionAction(private val snippet: Snippet) : DumbAwareAction() {
     override fun actionPerformed(e: AnActionEvent) {
         val scheduler = service<TypewriterExecutorService>()
-        TypeWriterAction.executeTyping(
+        executeTyping(
             e,
             snippet.text,
             snippet.openingSequence,

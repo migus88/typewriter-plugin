@@ -69,43 +69,50 @@ class TypeWriterAction : DumbAwareAction() {
                 keymap.addShortcut(actionId, shortcut)
             }
         }
+        executeTyping(
+            e = e,
+            text = dialog.text,
+            openingSequence = dialog.openingSequence,
+            closingSequence = dialog.closingSequence,
+            delay = dialog.delay.toLong(),
+            jitter = dialog.jitter,
+            scheduler = service<TypewriterExecutorService>()
+        )
     }
+}
 
-    companion object {
-        fun executeTyping(
-            e: AnActionEvent,
-            text: String,
-            openingSequence: String,
-            closingSequence: String,
-            delay: Long,
-            jitter: Int,
-            scheduler: TypewriterExecutorService
-        ) {
-            val escapedOpeningSequence = Regex.escape(openingSequence)
-            val escapedClosingSequence = Regex.escape(closingSequence)
-            val matches = """$escapedOpeningSequence(.*?)$escapedClosingSequence""".toRegex().findAll(text).iterator()
-            var cur: MatchResult? = null
-            while (true) {
-                val next = if (matches.hasNext()) matches.next() else null
-                val content = text.substring(cur?.range?.last?.plus(1) ?: 0, next?.range?.first ?: text.length)
-                val commands = WriteCharCommand.fromText(e, content, delay.toInt(), jitter)
-                for (command in commands) scheduler.enqueue(command)
-                if (next != null) {
-                    val (command, value) = next
-                        .value
-                        .substringAfter(openingSequence)
-                        .substringBeforeLast(closingSequence)
-                        .trim()
-                        .split(':')
-                        .map(String::trim)
-                    when (command) {
-                        "pause" -> scheduler.enqueue(PauseCommand(value.toLong()))
-                        "reformat" -> scheduler.enqueue(ReformatCommand(e))
-                    }
-                }
-                cur = next
-                if (cur == null) break
+fun executeTyping(
+    e: AnActionEvent,
+    text: String,
+    openingSequence: String,
+    closingSequence: String,
+    delay: Long,
+    jitter: Int,
+    scheduler: TypewriterExecutorService
+) {
+    val escapedOpeningSequence = Regex.escape(openingSequence)
+    val escapedClosingSequence = Regex.escape(closingSequence)
+    val matches = """$escapedOpeningSequence(.*?)$escapedClosingSequence""".toRegex().findAll(text).iterator()
+    var cur: MatchResult? = null
+    while (true) {
+        val next = if (matches.hasNext()) matches.next() else null
+        val content = text.substring(cur?.range?.last?.plus(1) ?: 0, next?.range?.first ?: text.length)
+        val commands = WriteCharCommand.fromText(e, content, delay.toInt(), jitter)
+        for (command in commands) scheduler.enqueue(command)
+        if (next != null) {
+            val (command, value) = next
+                .value
+                .substringAfter(openingSequence)
+                .substringBeforeLast(closingSequence)
+                .trim()
+                .split(':')
+                .map(String::trim)
+            when (command) {
+                "pause" -> scheduler.enqueue(PauseCommand(value.toLong()))
+                "reformat" -> scheduler.enqueue(ReformatCommand(e))
             }
         }
+        cur = next
+        if (cur == null) break
     }
 }

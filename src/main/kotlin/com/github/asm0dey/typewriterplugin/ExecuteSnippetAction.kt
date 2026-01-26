@@ -34,7 +34,7 @@ class ExecuteSnippetAction : AnAction() {
 
         // Execute the selected snippet
         val scheduler = service<TypewriterExecutorService>()
-        TypeWriterAction.executeTyping(
+        executeTyping(
             e,
             selectedSnippet.text,
             selectedSnippet.openingSequence,
