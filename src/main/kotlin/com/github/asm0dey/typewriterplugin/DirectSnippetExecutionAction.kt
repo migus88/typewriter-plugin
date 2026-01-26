@@ -7,6 +7,7 @@ import com.intellij.openapi.components.service
 import com.intellij.openapi.keymap.KeymapManager
 import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.startup.ProjectActivity
 import com.intellij.openapi.startup.StartupActivity
 import javax.swing.KeyStroke
 
@@ -84,8 +85,9 @@ class DirectSnippetExecutionAction(private val snippet: Snippet) : DumbAwareActi
 /**
  * Startup activity that registers keyboard shortcuts for snippets when the plugin is loaded.
  */
-class SnippetShortcutRegistrar : StartupActivity {
-    override fun runActivity(project: Project) {
+class SnippetShortcutRegistrar :  ProjectActivity {
+
+    override suspend fun execute(project: Project) {
         RegisterSnippetShortcutsAction.registerShortcuts()
     }
 }
