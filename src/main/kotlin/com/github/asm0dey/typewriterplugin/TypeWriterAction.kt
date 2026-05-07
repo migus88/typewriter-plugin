@@ -137,12 +137,14 @@ fun executeTyping(
 
     for (m in templateRegex.findAll(text)) {
         appendSegment(text.substring(lastEnd, m.range.first))
+        // Don't trim the raw body — for `complete`, the word may legitimately contain leading
+        // or trailing whitespace (e.g. `{_complete:3:private _}` to type "private " followed by
+        // the next token). Trim only the bits we need numeric/keyword parsing for.
         val raw = m.value
             .substringAfter(openingSequence)
             .substringBeforeLast(closingSequence)
-            .trim()
         val firstColon = raw.indexOf(':')
-        val name = if (firstColon < 0) raw else raw.substring(0, firstColon).trim()
+        val name = (if (firstColon < 0) raw else raw.substring(0, firstColon)).trim()
         val rest = if (firstColon < 0) "" else raw.substring(firstColon + 1)
         when (name) {
             "pause" -> commands += PauseCommand(rest.trim().toLongOrNull() ?: 0L)

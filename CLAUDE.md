@@ -86,7 +86,11 @@ Templates are inline directives in the source text, wrapped in the configured op
 
 - `{_pause:N_}` — `PauseCommand(N)` (milliseconds).
 - `{_reformat_}` — `ReformatCommand`.
-- `{_complete:N:Word_}` — auto-completion imitation. Splits the args body again on the first `:` so `Word` can contain anything (including more colons). Expands to: `WriteTextCommand(prefix)` for the first `N` chars, then `TriggerAutocompleteCommand(completionDelay)` to surface the IDE's popup and wait, then `WriteTextCommand(rest)` for the tail — visually the same shape as a user typing a few chars and accepting a suggestion.
+- `{_complete:N:Word_}` — auto-completion imitation. Splits the args body again on the first `:` so `Word` can contain anything (including more colons). Expands to: `WriteTextCommand(prefix)` for the first `N` chars, then `TriggerAutocompleteCommand(completionDelay)` to surface the IDE's popup, wait, and **dismiss it**, then `WriteTextCommand(rest)` for the tail — visually the same shape as a user typing a few chars and accepting a suggestion.
+
+  **Two gotchas burned into this code:**
+  1. The raw body is *not* trimmed before splitting. Trimming would eat trailing whitespace inside the marker (e.g. `{_complete:3:private _}` is the user asking for `"private "`). Only `name`, the `pause` value, and the `complete:N` argument are trimmed individually.
+  2. `TriggerAutocompleteCommand` *dismisses* the lookup at the end of its sleep. Leaving the lookup alive made the next `WriteTextCommand` ' s leading space disappear — IntelliJ's lookup treats space as an accept-and-consume completion character, eating the typed character whole.
 
 `completionDelay` is a global setting (`TypeWriterSettings.completionDelay`, exposed in the dialog). Per-`{_complete_}` config is just the `N` argument.
 
