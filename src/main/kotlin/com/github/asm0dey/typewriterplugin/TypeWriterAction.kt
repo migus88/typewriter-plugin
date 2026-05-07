@@ -4,6 +4,7 @@ import com.github.asm0dey.typewriterplugin.commands.Command
 import com.github.asm0dey.typewriterplugin.commands.MoveCaretCommand
 import com.github.asm0dey.typewriterplugin.commands.PauseCommand
 import com.github.asm0dey.typewriterplugin.commands.ReformatCommand
+import com.github.asm0dey.typewriterplugin.commands.TriggerAutocompleteCommand
 import com.github.asm0dey.typewriterplugin.commands.WriteTextCommand
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
@@ -44,6 +45,7 @@ fun executeTyping(
     closingSequence: String,
     delay: Long,
     jitter: Int,
+    completionDelay: Long,
     scheduler: TypewriterExecutorService,
     onDone: () -> Unit,
 ) {
@@ -135,17 +137,33 @@ fun executeTyping(
 
     for (m in templateRegex.findAll(text)) {
         appendSegment(text.substring(lastEnd, m.range.first))
-        val parts = m.value
+        val raw = m.value
             .substringAfter(openingSequence)
             .substringBeforeLast(closingSequence)
             .trim()
-            .split(':')
-            .map(String::trim)
-        val name = parts[0]
-        val value = parts.getOrNull(1).orEmpty()
+        val firstColon = raw.indexOf(':')
+        val name = if (firstColon < 0) raw else raw.substring(0, firstColon).trim()
+        val rest = if (firstColon < 0) "" else raw.substring(firstColon + 1)
         when (name) {
-            "pause" -> commands += PauseCommand(value.toLongOrNull() ?: 0L)
+            "pause" -> commands += PauseCommand(rest.trim().toLongOrNull() ?: 0L)
             "reformat" -> commands += ReformatCommand(editor)
+            "complete" -> {
+                // Format: complete:N:Word — type N chars of Word, trigger auto-popup, wait
+                // completionDelay ms, then drop the rest of Word in a single tick.
+                val secondColon = rest.indexOf(':')
+                if (secondColon > 0) {
+                    val n = rest.substring(0, secondColon).trim().toIntOrNull() ?: 0
+                    val word = rest.substring(secondColon + 1)
+                    if (word.isNotEmpty()) {
+                        val effectiveN = n.coerceIn(0, word.length)
+                        val prefix = word.substring(0, effectiveN)
+                        val tail = word.substring(effectiveN)
+                        if (prefix.isNotEmpty()) commands += WriteTextCommand(prefix, pause(), editor)
+                        commands += TriggerAutocompleteCommand(completionDelay, editor)
+                        if (tail.isNotEmpty()) commands += WriteTextCommand(tail, pause(), editor)
+                    }
+                }
+            }
         }
         lastEnd = m.range.last + 1
     }

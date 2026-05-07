@@ -17,6 +17,7 @@ import com.intellij.openapi.ui.DialogPanel
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.DialogWrapper.IdeModalityType
 import com.intellij.openapi.ui.Messages
+import com.intellij.openapi.wm.IdeFocusManager
 import com.intellij.testFramework.LightVirtualFile
 import com.intellij.ui.EditorTextField
 import com.intellij.ui.SimpleListCellRenderer
@@ -54,6 +55,7 @@ class TypeWriterDialog(private val project: Project) :
     var openingSequence: String = settings.openingSequence
     var closingSequence: String = settings.closingSequence
     var keepOpen: Boolean = settings.keepOpen
+    var completionDelay: Int = settings.completionDelay
 
     private val tabsState: MutableList<TabState> = mutableListOf()
     private var activeTabIndex: Int = 0
@@ -310,6 +312,14 @@ class TypeWriterDialog(private val project: Project) :
                     .bindText(::closingSequence)
             }
             row {
+                intTextField(IntRange(0, 10000), 4)
+                    .label(message("dialog.completion.delay"))
+                    .bindIntText(::completionDelay)
+                    .gap(RightGap.SMALL)
+                @Suppress("DialogTitleCapitalization")
+                label(message("dialog.ms"))
+            }
+            row {
                 checkBox(message("dialog.keep.open"))
                     .bindSelected(::keepOpen)
             }
@@ -341,6 +351,9 @@ class TypeWriterDialog(private val project: Project) :
             // Stay open during the run so the Stop button is reachable. Freeze inputs;
             // onTypingDone unfreezes (or closes, if the user toggled keepOpen off mid-run).
             setUiEnabled(false)
+            // Push focus to the target editor so its caret blinks and is visible while typing.
+            // requestFocusInWindow doesn't cross window boundaries; IdeFocusManager does.
+            IdeFocusManager.getInstance(project).requestFocus(editor.contentComponent, true)
             executeTyping(
                 editor = editor,
                 text = activeText,
@@ -348,6 +361,7 @@ class TypeWriterDialog(private val project: Project) :
                 closingSequence = closingSequence,
                 delay = delay.toLong(),
                 jitter = jitter,
+                completionDelay = completionDelay.toLong(),
                 scheduler = scheduler,
                 onDone = ::onTypingDone,
             )
@@ -362,6 +376,7 @@ class TypeWriterDialog(private val project: Project) :
                 closingSequence = closingSequence,
                 delay = delay.toLong(),
                 jitter = jitter,
+                completionDelay = completionDelay.toLong(),
                 scheduler = scheduler,
                 onDone = {},
             )
@@ -372,8 +387,11 @@ class TypeWriterDialog(private val project: Project) :
         if (isDisposed) return
         if (keepOpen) {
             setUiEnabled(true)
-            // Don't snap focus back to this dialog — the user wants to watch the result.
-            targetEditor?.contentComponent?.requestFocusInWindow()
+            // Cross-window focus: keep the typed-into editor focused so the user can keep
+            // working there. Plain requestFocusInWindow can't move focus to a different window.
+            targetEditor?.let {
+                IdeFocusManager.getInstance(project).requestFocus(it.contentComponent, true)
+            }
         } else {
             close(OK_EXIT_CODE)
         }
@@ -414,6 +432,7 @@ class TypeWriterDialog(private val project: Project) :
         settings.openingSequence = openingSequence
         settings.closingSequence = closingSequence
         settings.keepOpen = keepOpen
+        settings.completionDelay = completionDelay
         settings.activeTabIndex = activeTabIndex
         settings.tabs = tabsState.map { it.toData() }.toMutableList()
     }

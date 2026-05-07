@@ -28,6 +28,7 @@ class TypeWriterSettings : PersistentStateComponent<TypeWriterSettings> {
     var openingSequence: String = TypeWriterConstants.defaultOpeningSequence
     var closingSequence: String = TypeWriterConstants.defaultClosingSequence
     var keepOpen: Boolean = false
+    var completionDelay: Int = TypeWriterConstants.defaultCompletionDelay
 
     // Legacy single-text fields. Migrated into a tab on first load if present.
     var text: String = ""

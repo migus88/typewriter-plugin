@@ -80,6 +80,26 @@ The pairs map is computed against the template-stripped concat, so brackets spli
 
 Caveat: the matcher is naive char-level — it doesn't understand strings or comments. A `{` inside `"json: { foo }"` will get auto-paired, which is wrong. Teach the matcher to skip ranges between matched quote/comment delimiters if that becomes an issue.
 
+### Template commands
+
+Templates are inline directives in the source text, wrapped in the configured opening/closing markers (default `{_` / `_}`). Parser splits on the *first* colon to get the command name; everything after is the args body, parsed per-command:
+
+- `{_pause:N_}` — `PauseCommand(N)` (milliseconds).
+- `{_reformat_}` — `ReformatCommand`.
+- `{_complete:N:Word_}` — auto-completion imitation. Splits the args body again on the first `:` so `Word` can contain anything (including more colons). Expands to: `WriteTextCommand(prefix)` for the first `N` chars, then `TriggerAutocompleteCommand(completionDelay)` to surface the IDE's popup and wait, then `WriteTextCommand(rest)` for the tail — visually the same shape as a user typing a few chars and accepting a suggestion.
+
+`completionDelay` is a global setting (`TypeWriterSettings.completionDelay`, exposed in the dialog). Per-`{_complete_}` config is just the `N` argument.
+
+### Focus and caret visibility
+
+The dialog is a separate window from the IDE. `Component.requestFocusInWindow()` only moves focus *within* a window — useless for going from the dialog back to the editor. Use `IdeFocusManager.getInstance(project).requestFocus(component, /*forced=*/true)` instead.
+
+Two places we explicitly do this:
+1. **Start of a `keepOpen=true` run** — we transfer focus to the target editor so its caret blinks during typing. Without this the editor is unfocused and the caret renders statically (or off-screen if not scrolled into view), making it hard to see.
+2. **End of a `keepOpen=true` run** — we *keep* focus on the editor (`onTypingDone`). Otherwise the dialog naturally reclaims focus when re-enabled, which the user does not want when they're watching their newly-typed code.
+
+`WriteTextCommand` and `MoveCaretCommand` both call `editor.scrollingModel.scrollToCaret(ScrollType.RELATIVE)` after they touch the caret, so the caret stays on screen even if the typed-in line moves below the viewport.
+
 ### Why structural auto-pair?
 
 Matched brackets land in the document at the same instant *along with the surrounding whitespace from the source*. So if the source is
@@ -161,11 +181,12 @@ com.github.asm0dey.typewriterplugin
 ├── TypewriterExecutorService     # @Service(APP) single-threaded scheduler, Disposable
 ├── TypeWriterBundle / TypeWriterConstants
 └── commands/
-    ├── Command                   # marker interface : Runnable
-    ├── WriteTextCommand          # insertString(text) + caret.moveToOffset(+text.length)
-    ├── MoveCaretCommand          # caret.moveToOffset(+delta) — delta can be negative
-    ├── PauseCommand              # Thread.sleep
-    └── ReformatCommand           # invokes the "ReformatCode" action
+    ├── Command                       # marker interface : Runnable
+    ├── WriteTextCommand              # insertString(text) + caret.moveToOffset + scrollToCaret
+    ├── MoveCaretCommand              # caret.moveToOffset(+delta) + scrollToCaret
+    ├── TriggerAutocompleteCommand    # AutoPopupController.scheduleAutoPopup + sleep
+    ├── PauseCommand                  # Thread.sleep
+    └── ReformatCommand               # invokes the "ReformatCode" action
 ```
 
 ### Things to watch for when modifying
