@@ -52,10 +52,52 @@ So:
 
 `executeTyping` in `TypeWriterAction.kt` is the single entry point. It:
 
-1. Splits the input on the configured opening/closing template markers (default `{_…_}`) using a regex built from `Regex.escape(...)`.
-2. For each plain-text segment, calls `WriteCharCommand.fromText(...)` which yields one `WriteCharCommand` per character with `delay ± random(jitter)` ms pause. Leading whitespace on each line is stripped — the IDE's enter-handler re-indents.
-3. For each template match, appends either a `PauseCommand` or `ReformatCommand`.
-4. The collected list is handed to `TypewriterExecutorService.start(commands, onDone)` as a single session. The `Thread.sleep` inside each command provides the inter-character pacing.
+1. Strips template markers (default `{_…_}`) out of the input to produce a **code-only** view, then runs a stack-based bracket matcher over it (`classify`).
+2. For every correctly-nested `{}`, `()`, `[]` pair, the matcher classifies each source position:
+   - **opener** → `AutoPair` carrying the body's leading and trailing whitespace
+   - **leading whitespace** between opener and body → `ConsumeOnly` (the auto-pair sequence already inserts these; the source-walker emits no command for them)
+   - **trailing whitespace** + the **closer** → `SkipChar` (caret steps over what's already there)
+3. Walks the original text. The walker handles three kinds of "chunking":
+   - **AutoPair openers** expand into a *sequence* of commands (see below).
+   - **Consecutive `SkipChar` positions** collapse into a single `MoveCaretCommand(count)`.
+   - **Line-start whitespace runs** in unclassified body chars collapse into a single `WriteTextCommand` — that's the "indentation as one keystroke" rule.
+4. For each template match, appends a `PauseCommand` or `ReformatCommand`.
+5. Hands the list to `TypewriterExecutorService.start(commands, onDone)` as one session. `Thread.sleep` inside each command provides the inter-character pacing.
+
+### Auto-pair as a sequence
+
+When the walker hits an opener, `emitAutoPair` lays the structure down left-to-right with one command — and one paused tick — per piece:
+
+1. `WriteTextCommand` for the opener.
+2. One `WriteTextCommand` per chunk of the body's leading whitespace. `chunkWhitespace` keeps each `\n` together with the indent that follows it — so `"\n    "` is *one* tick, `"\n\n    "` is two (`"\n"` then `"\n    "`), and a pure indent with no preceding newline is its own chunk.
+3. One `WriteTextCommand` per chunk of trailing whitespace, in source order.
+4. `WriteTextCommand` for the closer.
+5. `MoveCaretCommand(-(trailing.length + 1))` jumps the caret back from past-closer to the body slot.
+
+By the time step 5 finishes, the document holds the entire `opener + leading + trailing + closer` structure in its final shape, the caret is on the body line at the right column, and every step took its own delay-jitter pause. The body chars that follow type into the slot.
+
+The pairs map is computed against the template-stripped concat, so brackets split across template markers (`class X {\n{_pause:1000_}\n}`) still pair up.
+
+Caveat: the matcher is naive char-level — it doesn't understand strings or comments. A `{` inside `"json: { foo }"` will get auto-paired, which is wrong. Teach the matcher to skip ranges between matched quote/comment delimiters if that becomes an issue.
+
+### Why structural auto-pair?
+
+Matched brackets land in the document at the same instant *along with the surrounding whitespace from the source*. So if the source is
+
+```
+class X
+{
+    body
+}
+```
+
+the moment the user's `{` is typed, the document already contains `{\n    \n}` with the caret on the indented blank line — the closer is on its proper line from the start, not "riding along" with the body until a later newline pushes it down.
+
+This also keeps the syntax tree balanced at every moment of the run, which is what allows the IDE's highlighter (lexer-based) and the daemon code analyzer (semantic) to keep up — typing into an open `{` with no closer leaves the parser in an "incomplete code" state and many language plugins delay analysis until the syntax recovers, which manifests as un-highlighted text mid-run.
+
+The pre-scan ignores template markers — so if your script is `class X {\n{_pause:1000_}\n}`, the `{` and `}` still pair up across the pause. Bracket-matching that fails (mismatched / unbalanced input) leaves the offending characters unclassified and they fall through to plain typing.
+
+Caveat: the matcher is naive char-level — it doesn't understand strings or comments. A `{` inside `"json: { foo }"` will get auto-paired, which is wrong. If that becomes an issue, the next step is teaching the matcher to skip ranges between matched quote/comment delimiters.
 
 ### TypewriterExecutorService — sessions, stop, and `onDone`
 
@@ -69,41 +111,44 @@ App-level `@Service`. Wraps a single-threaded `ScheduledExecutorService`. Expose
 
 The dialog uses `onDone` to thaw its inputs (or close, if `keepOpen` is off).
 
-### WriteCharCommand
+### Command primitives
 
-Deliberately minimal. For every character — including `\n` — the command does exactly this inside a `WriteCommandAction`:
+Two primitives, both deliberately minimal — neither calls IDE action handlers (`TypedAction`, `ACTION_EDITOR_ENTER`, `MOVE_CARET_RIGHT`, etc.):
 
-```kotlin
-val offset = caret.offset
-document.insertString(offset, char.toString())
-caret.moveToOffset(offset + 1)
-```
+- `WriteTextCommand(text, …)`: `document.insertString(caret.offset, text)` + `caret.moveToOffset(offset + text.length)` inside a `WriteCommandAction`. Single edit, single tick — used both for individual characters and for chunked indentation runs.
+- `MoveCaretCommand(delta, …)`: `caret.moveToOffset(caret.offset + delta)` on the EDT, no document change. Positive delta steps over inserted trailing whitespace + closer; negative delta jumps back to the body slot after an auto-pair.
 
-No action handlers, no special cases, no leading-whitespace strip, no auto-pair handling. Whatever string is in the dialog's editor is what gets typed into the target editor, character by character. The user owns the indentation; the IDE doesn't get a chance to be "smart" about it.
+Past iterations tried `TypedAction` (to get completion popups), `ACTION_EDITOR_START_NEW_LINE` for newlines, and a `}`-after-newline workaround. All three were removed because language plugins (Rider's C# typed handler in particular) hooked them and produced duplicate braces / extra block scaffolding that wasn't cleanly fixable from outside the language SDK. **Don't add IDE-action plumbing back into these commands without explicit user request** — this is the third revert in a row. All structural behavior the user has asked for (auto-pair, indent chunking, etc.) lives in the *planner* (`executeTyping`), not in the primitives.
 
-Past iterations tried `TypedAction` (to get completion popups), `ACTION_EDITOR_START_NEW_LINE` for newlines, and a `}`-after-newline workaround. All three were removed because language plugins (Rider's C# typed handler in particular) hooked them and produced duplicate braces / extra block scaffolding that wasn't cleanly fixable from outside the language SDK. The simpler the typing logic, the more predictable the output. **Don't add typing-behavior logic back without explicit user request** — this is the third revert in a row.
-
-The `Thread.sleep` for the post-character pause is outside the write action.
+`Thread.sleep` for the post-tick pause is outside the write action / EDT call.
 
 ### TypeWriterDialog
 
 UI is built with the IntelliJ Kotlin UI DSL (`panel { row { ... } }`). It is **non-modal** (`IdeModalityType.MODELESS`, `isModal = false`) — the user can keep it open while clicking around the IDE, and the active editor is resolved at "Start" time, not at action-trigger time.
 
-The text input is an `EditorTextField` backed by a `LightVirtualFile`. Going through `LightVirtualFile` rather than a raw in-memory `Document` is what gets us PSI: completion, brace matching, formatting, indent guides, and the rest of the "real editor" experience inside the dialog. Changing the language combo creates a fresh `LightVirtualFile` of the new `FileType` and calls `setNewDocumentAndFileType` so the highlighter switches without losing the user's text.
+**Tabs.** A `JBTabbedPane` hosts one `EditorTextField` per tab. Each tab has its own `TabState` (name, `FileType`, editor field). Tab headers are custom `JPanel`s with a label + close (`AllIcons.Actions.Close`) icon. A toolbar above the tabbed pane has the language combo (which follows the active tab) and a `New tab` button. Tab management:
+- `addNewTab()` appends a `TabState`, registers a new tab + custom header, selects it.
+- `closeTab(state)` removes the tab; refuses if it's the last one.
+- `nextTabName()` finds the highest `Tab N` integer in current names and adds one.
 
-A `ComboBox<FileType>` populated from `FileTypeManager.getInstance().registeredFileTypes` (filtered to non-binary, sorted alphabetically) drives the highlighter. Defaults: the persisted choice from a previous session, falling back to whichever file is focused in the project at action-trigger time, falling back to `PlainTextFileType.INSTANCE`.
+Per-tab data persists via `TabData` (`name`, `text`, `fileTypeName`). The dialog rebuilds tabs from `settings.tabs` on construction; `persistSettings()` flushes them on dispose / OK.
 
-The text is read from the field in `doOKAction()` rather than via `bindText` — `EditorTextField`'s API doesn't plug into the UI DSL's text bindings.
+**Editor backing.** Each tab's `EditorTextField` is backed by a `LightVirtualFile` so PSI is available — that's what enables completion, brace matching, formatting, indent guides, and the rest of the "real editor" experience inside the dialog. Changing the language combo creates a fresh `LightVirtualFile` of the new `FileType` and calls `setNewDocumentAndFileType` so the highlighter switches without losing the user's text. The `suppressLanguageListener` flag prevents reentrancy when the combo's selection changes due to a tab switch (rather than user action).
 
-`doOKAction` never calls `super.doOKAction()` — instead it freezes the dialog inputs (`setUiEnabled(false)`), kicks off the typing session, and lets the `onDone` callback decide what to do when the run finishes: thaw the inputs (when `keepOpen` is true) or `close(OK_EXIT_CODE)` (when it's false). The dialog therefore stays visible for the duration of every run, which is what makes the **Stop** button reachable.
+**Run modes.** `doOKAction` branches on the persisted `keepOpen` flag:
+- **`keepOpen = false`** — calls `super.doOKAction()` to close the dialog *before* `executeTyping`. Focus returns to the IDE editor; typing then plays into it. There's no Stop button (the dialog is gone), and `onDone = {}` (nothing to thaw).
+- **`keepOpen = true`** — does *not* close the dialog. Calls `setUiEnabled(false)` to freeze every input, then runs typing with `onDone = ::onTypingDone`. When the run finishes (or `Stop` cancels it), `onTypingDone` re-enables the UI and explicitly calls `targetEditor?.contentComponent?.requestFocusInWindow()` so focus stays on the typed-into editor — not the dialog.
 
-`setUiEnabled(false)` walks the `dialogPanel` tree disabling every component, then calls `editorField.setViewer(true)` so the code area becomes read-only (plain `isEnabled = false` doesn't prevent typing into an `EditorTextField`). The Start/Stop `DialogWrapperAction`s are toggled in lockstep so only one is enabled at a time.
+`setUiEnabled(false)` walks the `dialogPanel` tree disabling every component, then calls `setViewer(true)` on every tab's `EditorTextField` so the code areas become read-only (plain `isEnabled = false` doesn't prevent typing into an `EditorTextField`). Start/Stop actions are toggled so only one is enabled at a time.
 
 `doCancelAction` and `dispose()` both call `scheduler.stop()` — closing the window stops any in-flight typing. `dispose()` also makes a best-effort save of the current state.
 
 ### TypeWriterSettings
 
-Application-level `PersistentStateComponent` (`@Service(APP)`, stored in `typewriter.xml`) holding `text`, `delay`, `jitter`, `openingSequence`, `closingSequence`, `keepOpen`, and `fileTypeName`. Survives IDE restart. The dialog reads from it on construction and writes to it on OK or close.
+Application-level `PersistentStateComponent` (`@Service(APP)`, stored in `typewriter.xml`). Holds:
+- `tabs: MutableList<TabData>` and `activeTabIndex: Int` — per-tab state.
+- `delay`, `jitter`, `openingSequence`, `closingSequence`, `keepOpen` — shared across tabs.
+- `text` and `fileTypeName` — *legacy* fields. They stay on the class so old XML loads cleanly; `loadState` folds any non-empty legacy content into a single seed `TabData` and clears the originals.
 
 ### Module layout
 
@@ -116,7 +161,8 @@ com.github.asm0dey.typewriterplugin
 ├── TypeWriterBundle / TypeWriterConstants
 └── commands/
     ├── Command                   # marker interface : Runnable
-    ├── WriteCharCommand          # single char via document.insertString + MOVE_CARET_RIGHT
+    ├── WriteTextCommand          # insertString(text) + caret.moveToOffset(+text.length)
+    ├── MoveCaretCommand          # caret.moveToOffset(+delta) — delta can be negative
     ├── PauseCommand              # Thread.sleep
     └── ReformatCommand           # invokes the "ReformatCode" action
 ```

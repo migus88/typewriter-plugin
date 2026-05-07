@@ -1,13 +1,15 @@
 package com.github.asm0dey.typewriterplugin
 
 import com.github.asm0dey.typewriterplugin.commands.Command
+import com.github.asm0dey.typewriterplugin.commands.MoveCaretCommand
 import com.github.asm0dey.typewriterplugin.commands.PauseCommand
 import com.github.asm0dey.typewriterplugin.commands.ReformatCommand
-import com.github.asm0dey.typewriterplugin.commands.WriteCharCommand
+import com.github.asm0dey.typewriterplugin.commands.WriteTextCommand
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.project.DumbAwareAction
+import kotlin.random.Random
 
 class TypeWriterAction : DumbAwareAction() {
 
@@ -15,6 +17,24 @@ class TypeWriterAction : DumbAwareAction() {
         val project = e.getData(CommonDataKeys.PROJECT) ?: return
         TypeWriterDialog(project).show()
     }
+}
+
+private val OPEN_TO_CLOSE = mapOf('{' to '}', '(' to ')', '[' to ']')
+private val CLOSE_TO_OPEN = OPEN_TO_CLOSE.entries.associate { (k, v) -> v to k }
+
+private sealed class Classification {
+    data class AutoPair(
+        val open: Char,
+        val leading: String,
+        val trailing: String,
+        val close: Char,
+    ) : Classification()
+
+    /** Source position is part of leading whitespace already inserted by the auto-pair sequence. */
+    object ConsumeOnly : Classification()
+
+    /** Source position is part of trailing whitespace or the closer — caret steps over it. */
+    object SkipChar : Classification()
 }
 
 fun executeTyping(
@@ -27,30 +47,194 @@ fun executeTyping(
     scheduler: TypewriterExecutorService,
     onDone: () -> Unit,
 ) {
-    val escapedOpeningSequence = Regex.escape(openingSequence)
-    val escapedClosingSequence = Regex.escape(closingSequence)
-    val matches = """$escapedOpeningSequence(.*?)$escapedClosingSequence""".toRegex().findAll(text).iterator()
+    val templateRegex = """${Regex.escape(openingSequence)}(.*?)${Regex.escape(closingSequence)}""".toRegex()
+
+    // Build a "code only" view (template markers stripped) for bracket-matching.
+    val concat = StringBuilder().apply {
+        var lastEnd = 0
+        for (m in templateRegex.findAll(text)) {
+            append(text, lastEnd, m.range.first)
+            lastEnd = m.range.last + 1
+        }
+        append(text, lastEnd, text.length)
+    }.toString()
+
+    val classification = classify(concat)
+
+    fun pause(): Int = (delay + Random.nextInt(-jitter, jitter + 1))
+        .toInt()
+        .coerceAtLeast(0)
+
     val commands = mutableListOf<Command>()
-    var cur: MatchResult? = null
-    while (true) {
-        val next = if (matches.hasNext()) matches.next() else null
-        val content = text.substring(cur?.range?.last?.plus(1) ?: 0, next?.range?.first ?: text.length)
-        commands += WriteCharCommand.fromText(editor, content, delay.toInt(), jitter)
-        if (next != null) {
-            val (command, value) = next
-                .value
-                .substringAfter(openingSequence)
-                .substringBeforeLast(closingSequence)
-                .trim()
-                .split(':')
-                .map(String::trim)
-            when (command) {
-                "pause" -> commands += PauseCommand(value.toLong())
-                "reformat" -> commands += ReformatCommand(editor)
+    var concatPos = 0
+    var lastEnd = 0
+
+    fun emitAutoPair(cls: Classification.AutoPair) {
+        // Lay the structure down left-to-right, advancing the caret with each piece. After the
+        // closer is in place the caret is past it, so a final MoveCaret jumps back to the body
+        // slot. Each piece (including the move-back) is its own paused tick — that's what makes
+        // the brace appearance respect the configured delay.
+        commands += WriteTextCommand(cls.open.toString(), pause(), editor)
+        for (chunk in chunkWhitespace(cls.leading)) {
+            commands += WriteTextCommand(chunk, pause(), editor)
+        }
+        for (chunk in chunkWhitespace(cls.trailing)) {
+            commands += WriteTextCommand(chunk, pause(), editor)
+        }
+        commands += WriteTextCommand(cls.close.toString(), pause(), editor)
+        val backDelta = -(cls.trailing.length + 1)
+        if (backDelta != 0) commands += MoveCaretCommand(backDelta, pause(), editor)
+    }
+
+    fun appendSegment(segment: String) {
+        var i = 0
+        while (i < segment.length) {
+            val pos = concatPos + i
+            when (val cls = classification[pos]) {
+                is Classification.AutoPair -> {
+                    emitAutoPair(cls)
+                    i++
+                }
+
+                Classification.ConsumeOnly -> {
+                    i++
+                }
+
+                Classification.SkipChar -> {
+                    var count = 0
+                    while (i + count < segment.length &&
+                        classification[concatPos + i + count] == Classification.SkipChar
+                    ) {
+                        count++
+                    }
+                    commands += MoveCaretCommand(count, pause(), editor)
+                    i += count
+                }
+
+                null -> {
+                    val c = segment[i]
+                    if (isLineStart(concat, pos) && isIndentChar(c)) {
+                        var len = 0
+                        while (i + len < segment.length &&
+                            classification[concatPos + i + len] == null &&
+                            isIndentChar(segment[i + len])
+                        ) {
+                            len++
+                        }
+                        commands += WriteTextCommand(segment.substring(i, i + len), pause(), editor)
+                        i += len
+                    } else {
+                        commands += WriteTextCommand(c.toString(), pause(), editor)
+                        i++
+                    }
+                }
             }
         }
-        cur = next
-        if (cur == null) break
+        concatPos += segment.length
     }
+
+    for (m in templateRegex.findAll(text)) {
+        appendSegment(text.substring(lastEnd, m.range.first))
+        val parts = m.value
+            .substringAfter(openingSequence)
+            .substringBeforeLast(closingSequence)
+            .trim()
+            .split(':')
+            .map(String::trim)
+        val name = parts[0]
+        val value = parts.getOrNull(1).orEmpty()
+        when (name) {
+            "pause" -> commands += PauseCommand(value.toLongOrNull() ?: 0L)
+            "reformat" -> commands += ReformatCommand(editor)
+        }
+        lastEnd = m.range.last + 1
+    }
+    appendSegment(text.substring(lastEnd))
+
     scheduler.start(commands, onDone)
+}
+
+private fun isIndentChar(c: Char): Boolean = c == ' ' || c == '\t'
+
+private fun isLineStart(concat: String, pos: Int): Boolean = pos == 0 || concat[pos - 1] == '\n'
+
+/**
+ * Split a whitespace string into typing chunks. Each `\n` carries its following indent run, so
+ * `"\n    "` is one chunk (one tick), and `"\n\n    "` is two chunks (`"\n"` then `"\n    "`).
+ * A pure indent run with no preceding newline is also its own chunk.
+ */
+private fun chunkWhitespace(ws: String): List<String> {
+    if (ws.isEmpty()) return emptyList()
+    val result = mutableListOf<String>()
+    var i = 0
+
+    // Leading non-newline whitespace (indent without a preceding `\n`) is its own chunk.
+    var leadingEnd = 0
+    while (leadingEnd < ws.length && ws[leadingEnd] != '\n') leadingEnd++
+    if (leadingEnd > 0) {
+        result += ws.substring(0, leadingEnd)
+        i = leadingEnd
+    }
+
+    while (i < ws.length) {
+        val start = i
+        i++ // the `\n`
+        while (i < ws.length && ws[i] != '\n') i++
+        result += ws.substring(start, i)
+    }
+    return result
+}
+
+/**
+ * Stack-based bracket matching producing a per-index classification map. Bracket pairs that are
+ * correctly nested produce an [Classification.AutoPair] at the opener index, [Classification.ConsumeOnly]
+ * over the leading whitespace, and [Classification.SkipChar] over the trailing whitespace and the
+ * closer. Everything else is unclassified (`null`) and treated as a regular character.
+ */
+private fun classify(content: String): Map<Int, Classification> {
+    val pairs = mutableMapOf<Int, Int>()
+    val stack = ArrayDeque<Pair<Char, Int>>()
+    for (i in content.indices) {
+        val c = content[i]
+        when {
+            c in OPEN_TO_CLOSE -> stack.addLast(c to i)
+            c in CLOSE_TO_OPEN -> {
+                val top = stack.lastOrNull()
+                if (top != null && top.first == CLOSE_TO_OPEN[c]) {
+                    pairs[top.second] = i
+                    stack.removeLast()
+                }
+            }
+        }
+    }
+
+    val result = mutableMapOf<Int, Classification>()
+    for ((openIdx, closeIdx) in pairs) {
+        var firstNonWs = openIdx + 1
+        while (firstNonWs < closeIdx && content[firstNonWs].isWhitespace()) firstNonWs++
+
+        val leadingEnd: Int
+        val trailingStart: Int
+        if (firstNonWs >= closeIdx) {
+            // No body — everything between is whitespace. Treat it all as leading.
+            leadingEnd = closeIdx
+            trailingStart = closeIdx
+        } else {
+            var lastNonWs = closeIdx - 1
+            while (lastNonWs > openIdx && content[lastNonWs].isWhitespace()) lastNonWs--
+            leadingEnd = firstNonWs
+            trailingStart = lastNonWs + 1
+        }
+
+        result[openIdx] = Classification.AutoPair(
+            open = content[openIdx],
+            leading = content.substring(openIdx + 1, leadingEnd),
+            trailing = content.substring(trailingStart, closeIdx),
+            close = content[closeIdx],
+        )
+        for (i in (openIdx + 1) until leadingEnd) result[i] = Classification.ConsumeOnly
+        for (i in trailingStart until closeIdx) result[i] = Classification.SkipChar
+        result[closeIdx] = Classification.SkipChar
+    }
+    return result
 }
