@@ -4,6 +4,16 @@
 
 ## Unreleased
 
+## 0.4.0
+
+### Added
+
+- Enrich… / Unenrich toolbar buttons that wrap matching keywords in the active tab with `{{complete:N:Word}}` (and strip them back out).
+- Per-language enrichment presets shipped for Kotlin, Java, C#, Python, JavaScript, TypeScript, C++, C, PHP, Ruby, and Go. User-added keywords sit alongside the built-ins; built-ins can be disabled but not removed.
+- Per-keyword min/max bounds for the random `N` rolled at each occurrence, with three frequency modes (**All**, **Heavy**, **Light**).
+- Enrichment configuration (presets, per-keyword settings, last-used mode) survives IDE restart.
+- Vertical and horizontal scrollbars on the script editor — long scripts no longer push the dialog off-screen.
+
 ## 0.3.0
 
 Forked under **Engine Room Games**, rebuilt around screencast workflows.

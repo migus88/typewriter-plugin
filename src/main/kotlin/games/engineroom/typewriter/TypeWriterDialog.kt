@@ -4,6 +4,7 @@ import games.engineroom.typewriter.TypeWriterBundle.message
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.components.service
+import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.EditorFactory
@@ -54,6 +55,8 @@ import javax.swing.SwingUtilities
 import javax.swing.event.DocumentEvent
 import javax.swing.event.DocumentListener
 
+private val ENRICH_LOG = logger<TypeWriterDialog>()
+
 class TypeWriterDialog(private val project: Project) :
     DialogWrapper(project, true, IdeModalityType.MODELESS) {
 
@@ -75,6 +78,14 @@ class TypeWriterDialog(private val project: Project) :
     private val tabbedPane = JBTabbedPane()
     private val languageCombo: ComboBox<FileType> = ComboBox(textFileTypes())
     private val addTabButton: JButton = JButton(message("dialog.add.tab"), AllIcons.General.Add)
+    private val enrichButton: JButton = JButton(message("dialog.enrich")).apply {
+        toolTipText = message("dialog.enrich.tooltip")
+        addActionListener { openEnrichDialog() }
+    }
+    private val unenrichButton: JButton = JButton(message("dialog.unenrich")).apply {
+        toolTipText = message("dialog.unenrich.tooltip")
+        addActionListener { unenrichActiveTab() }
+    }
 
     private val templateList: JBList<TemplateEntry> = JBList(TemplateKind.entries.map { TemplateEntry(it) }).apply {
         selectionMode = ListSelectionModel.SINGLE_SELECTION
@@ -316,6 +327,10 @@ class TypeWriterDialog(private val project: Project) :
                 editor.settings.isIndentGuidesShown = true
                 editor.settings.additionalLinesCount = 0
                 editor.settings.isCaretRowShown = true
+                // EditorTextField hides scrollbars by default — long scripts then push the dialog
+                // taller instead of scrolling. Re-enable so the editor scrolls within its bounds.
+                editor.setVerticalScrollbarVisible(true)
+                editor.setHorizontalScrollbarVisible(true)
             }
         }
     }
@@ -334,6 +349,8 @@ class TypeWriterDialog(private val project: Project) :
             val left = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
                 add(JLabel(message("dialog.language") + ":"))
                 add(languageCombo)
+                add(enrichButton)
+                add(unenrichButton)
             }
             add(left, BorderLayout.WEST)
             add(addTabButton, BorderLayout.EAST)
@@ -433,6 +450,93 @@ class TypeWriterDialog(private val project: Project) :
      * Insert the template at the active tab's caret using the current marker settings, then
      * focus the editor field so the user can keep typing.
      */
+    /**
+     * Open the enrichment configuration popup for the active tab's language. The dialog mutates
+     * the persisted [EnrichmentPreset] in place; on OK we read its current state and apply
+     * [enrichText] to the active tab's content via a [WriteCommandAction] so undo works.
+     */
+    private fun openEnrichDialog() {
+        try {
+            // Live values: the user may have edited the marker fields without applying.
+            openingSequence = openingField.text
+            closingSequence = closingField.text
+
+            val state = tabsState[activeTabIndex]
+            val preset = resolveEnrichmentPreset(settings, state.fileType.name)
+            val mode = runCatching { EnrichmentMode.valueOf(settings.enrichmentMode) }
+                .getOrDefault(EnrichmentMode.HEAVY)
+
+            val dialog = EnrichDialog(
+                project = project,
+                languageDisplayName = preset.language.ifBlank { state.fileType.name },
+                preset = preset,
+                initialMode = mode,
+            )
+            if (!dialog.showAndGet()) return
+
+            val chosenMode = dialog.selectedMode
+            settings.enrichmentMode = chosenMode.name
+
+            val current = state.editorField.text
+            val transformed = enrichText(
+                text = current,
+                keywords = preset.keywords,
+                mode = chosenMode,
+                openingSequence = openingSequence,
+                closingSequence = closingSequence,
+            )
+            if (transformed == current) return
+            replaceTabText(state, transformed)
+        } catch (t: Throwable) {
+            ENRICH_LOG.error("Enrich dialog failed", t)
+            Messages.showErrorDialog(
+                project,
+                "Enrich failed: ${t.javaClass.simpleName}: ${t.message}",
+                message("dialog.title"),
+            )
+        }
+    }
+
+    private fun unenrichActiveTab() {
+        try {
+            openingSequence = openingField.text
+            closingSequence = closingField.text
+
+            val state = tabsState[activeTabIndex]
+            val current = state.editorField.text
+            val transformed = unenrichText(
+                text = current,
+                openingSequence = openingSequence,
+                closingSequence = closingSequence,
+            )
+            if (transformed == current) return
+            replaceTabText(state, transformed)
+        } catch (t: Throwable) {
+            ENRICH_LOG.error("Unenrich failed", t)
+            Messages.showErrorDialog(
+                project,
+                "Unenrich failed: ${t.javaClass.simpleName}: ${t.message}",
+                message("dialog.title"),
+            )
+        }
+    }
+
+    /**
+     * Replace the entire tab document via a write action so the change is undoable from the
+     * dialog's editor. After replacement, restore focus + caret position so the user can keep
+     * editing in place.
+     */
+    private fun replaceTabText(state: TabState, newText: String) {
+        val doc = state.editorField.document
+        val ed = state.editorField.editor
+        val originalCaret = ed?.caretModel?.primaryCaret?.offset ?: 0
+        WriteCommandAction.runWriteCommandAction(project) {
+            doc.replaceString(0, doc.textLength, newText)
+        }
+        ed?.caretModel?.primaryCaret?.moveToOffset(originalCaret.coerceIn(0, doc.textLength))
+        state.editorField.requestFocusInWindow()
+    }
+
     private fun insertTemplate(entry: TemplateEntry) {
         val state = tabsState[activeTabIndex]
         val syntax = entry.render(openingSequence, closingSequence)

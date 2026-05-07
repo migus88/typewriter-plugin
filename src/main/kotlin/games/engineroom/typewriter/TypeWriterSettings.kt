@@ -41,6 +41,16 @@ class TypeWriterSettings : PersistentStateComponent<TypeWriterSettings> {
     var keepOpen: Boolean = false
     var completionDelay: Int = TypeWriterConstants.defaultCompletionDelay
 
+    /**
+     * Per-language keyword presets used by the enrichment dialog. Lazily populated — a language
+     * only appears here once the user opens the enrich dialog while that language is active.
+     */
+    @get:XCollection(style = XCollection.Style.v2)
+    var enrichmentPresets: MutableList<EnrichmentPreset> = mutableListOf()
+
+    /** Last-selected enrichment mode, persisted so the dialog re-opens on the same setting. */
+    var enrichmentMode: String = EnrichmentMode.HEAVY.name
+
     // Legacy single-text fields. Migrated into a tab on first load if present.
     var text: String = ""
     var fileTypeName: String = ""
