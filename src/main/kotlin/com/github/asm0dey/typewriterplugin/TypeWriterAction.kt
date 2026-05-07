@@ -72,10 +72,15 @@ fun executeTyping(
     var lastEnd = 0
 
     fun emitAutoPair(cls: Classification.AutoPair) {
-        // Lay the structure down left-to-right, advancing the caret with each piece. After the
-        // closer is in place the caret is past it, so a final MoveCaret jumps back to the body
-        // slot. Each piece (including the move-back) is its own paused tick — that's what makes
-        // the brace appearance respect the configured delay.
+        // Type the opener through TypedAction (single-char route in WriteTextCommand). The IDE
+        // auto-pairs the closer for us — we deliberately **do not** type the closer ourselves.
+        // The matching source closer is classified `SkipChar` and advances the caret past the
+        // auto-paired character when reached.
+        //
+        // Subsequent leading/trailing inserts go via insertString (multi-char chunks). Each
+        // insert pushes the auto-paired closer rightward; after all chunks land, caret is past
+        // the trailing whitespace and we move it back by `trailing.length` to land on the
+        // body slot.
         commands += WriteTextCommand(cls.open.toString(), pause(), editor)
         for (chunk in chunkWhitespace(cls.leading)) {
             commands += WriteTextCommand(chunk, pause(), editor)
@@ -83,8 +88,7 @@ fun executeTyping(
         for (chunk in chunkWhitespace(cls.trailing)) {
             commands += WriteTextCommand(chunk, pause(), editor)
         }
-        commands += WriteTextCommand(cls.close.toString(), pause(), editor)
-        val backDelta = -(cls.trailing.length + 1)
+        val backDelta = -cls.trailing.length
         if (backDelta != 0) commands += MoveCaretCommand(backDelta, pause(), editor)
     }
 

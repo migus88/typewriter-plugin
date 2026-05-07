@@ -68,13 +68,12 @@ So:
 
 When the walker hits an opener, `emitAutoPair` lays the structure down left-to-right with one command — and one paused tick — per piece:
 
-1. `WriteTextCommand` for the opener.
-2. One `WriteTextCommand` per chunk of the body's leading whitespace. `chunkWhitespace` keeps each `\n` together with the indent that follows it — so `"\n    "` is *one* tick, `"\n\n    "` is two (`"\n"` then `"\n    "`), and a pure indent with no preceding newline is its own chunk.
-3. One `WriteTextCommand` per chunk of trailing whitespace, in source order.
-4. `WriteTextCommand` for the closer.
-5. `MoveCaretCommand(-(trailing.length + 1))` jumps the caret back from past-closer to the body slot.
+1. `WriteTextCommand(opener)` — typed via TypedAction (single-char route). **The IDE auto-pairs the closer here.** Doc grows by 2 characters (opener + auto-paired closer); caret lands between them.
+2. One `WriteTextCommand` per chunk of the body's leading whitespace. `chunkWhitespace` keeps each `\n` together with the indent that follows it — so `"\n    "` is *one* tick, `"\n\n    "` is two (`"\n"` then `"\n    "`), and a pure indent with no preceding newline is its own chunk. Each chunk inserts at the caret and pushes the auto-paired closer rightward.
+3. One `WriteTextCommand` per chunk of trailing whitespace, in source order. Same idea — pushes the closer further right.
+4. `MoveCaretCommand(-trailing.length)` jumps the caret back from past-trailing to the body slot. **No explicit closer is typed** — the IDE's auto-paired one is already there, and the source's matching closer is classified `SkipChar` and will advance the caret past it when reached.
 
-By the time step 5 finishes, the document holds the entire `opener + leading + trailing + closer` structure in its final shape, the caret is on the body line at the right column, and every step took its own delay-jitter pause. The body chars that follow type into the slot.
+By the time step 4 finishes, the document holds the entire `opener + leading + trailing + closer` structure in its final shape, the caret is on the body line at the right column, and every step took its own delay-jitter pause. The body chars that follow type into the slot via TypedAction (so the auto-popup stays alive during identifier typing).
 
 The pairs map is computed against the template-stripped concat, so brackets split across template markers (`class X {\n{{pause:1000}}\n}`) still pair up.
 
@@ -145,14 +144,16 @@ The dialog uses `onDone` to thaw its inputs (or close, if `keepOpen` is off).
 
 ### Command primitives
 
-Two primitives, both deliberately minimal — neither calls IDE action handlers (`TypedAction`, `ACTION_EDITOR_ENTER`, `MOVE_CARET_RIGHT`, etc.):
+Two primitives:
 
-- `WriteTextCommand(text, …)`: `document.insertString(caret.offset, text)` + `caret.moveToOffset(offset + text.length)` inside a `WriteCommandAction`. Single edit, single tick — used both for individual characters and for chunked indentation runs.
-- `MoveCaretCommand(delta, …)`: `caret.moveToOffset(caret.offset + delta)` on the EDT, no document change. Positive delta steps over inserted trailing whitespace + closer; negative delta jumps back to the body slot after an auto-pair.
-
-Past iterations tried `TypedAction` (to get completion popups), `ACTION_EDITOR_START_NEW_LINE` for newlines, and a `}`-after-newline workaround. All three were removed because language plugins (Rider's C# typed handler in particular) hooked them and produced duplicate braces / extra block scaffolding that wasn't cleanly fixable from outside the language SDK. **Don't add IDE-action plumbing back into these commands without explicit user request** — this is the third revert in a row. All structural behavior the user has asked for (auto-pair, indent chunking, etc.) lives in the *planner* (`executeTyping`), not in the primitives.
+- `WriteTextCommand(text, …)`: routes single-char inserts through `TypedAction.actionPerformed(editor, char, dataContext)` and multi-char inserts (or `\n`) through `Document.insertString`. The TypedAction route fires the IDE's full TypedHandler chain — keeping the auto-completion popup alive natively, letting the IDE auto-pair brackets/quotes, and giving language plugins (Rider's C# typing-assist, ReSharper, etc.) their expected typing events. The insertString route handles `\n` (so we don't smart-expand indentation in conflict with the source's explicit indent) and multi-char chunks (line-start indent runs, absorbed-tail blocks from `{{complete}}`).
+- `MoveCaretCommand(delta, …)`: `caret.moveToOffset(caret.offset + delta)` on the EDT, no document change. Positive delta steps over auto-paired closers / trailing whitespace; negative delta jumps back to the body slot after an auto-pair.
 
 `Thread.sleep` for the post-tick pause is outside the write action / EDT call.
+
+**The IDE auto-pairs brackets and quotes** when we type the opener via TypedAction. The planner cooperates with this — `emitAutoPair` types the opener and the leading/trailing whitespace chunks, but **does not type the closer itself**. The auto-paired closer fills that role; the source's matching closer is classified `SkipChar` and just advances the caret past the auto-paired character. Move-back delta is therefore `-trailing.length` (was `-(trailing.length + 1)` back when the planner typed its own closer).
+
+Past iterations of these primitives went through several reverts (`document.insertString` for everything, then back, then per-char TypedAction with various flavors) — the trade-off is summarized in the commit history. Don't change the routing rule without explicit user request, and re-test the full set of bug scenarios (`{{complete}}` + space, multi-line `{}` blocks at indent, popup flicker) before committing changes here.
 
 ### TypeWriterDialog
 
