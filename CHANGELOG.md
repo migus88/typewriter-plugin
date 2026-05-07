@@ -4,6 +4,33 @@
 
 ## Unreleased
 
+## 0.3.0
+
+Forked under **Engine Room Games**, rebuilt around screencast workflows.
+
+### Added
+
+- `Cmd`/`Ctrl`+`Shift`+`W` single-press shortcut.
+- Multi-tab dialog: each tab carries its own text and language; rename, close, reorder.
+- Real code editor in the dialog (`EditorTextField`) with syntax highlighting, completion, brace matching, and folding.
+- Non-modal dialog so it can live on a second screen during a take.
+- **Stop** button and UI freeze while a run is in progress.
+- Templates info panel — double-click to insert at the active tab's caret.
+- New `{{complete:N:Word}}` template that imitates IntelliSense (type N chars, surface the popup, finish the word).
+- IntelliSense popup stays alive natively during identifier typing (single chars routed through `TypedAction`).
+- Configurable completion delay.
+- All settings and tabs persist across IDE restarts.
+
+### Changed
+
+- Default template markers from `<…>` to `{{…}}`.
+- Default delay from 100 ms to 50 ms; default jitter from 0 ms to 30 ms.
+- Bracket auto-pair now cooperates with the IDE's native auto-pair instead of competing with it.
+
+### Removed
+
+- Per-snippet keyboard shortcuts (covered by tabs).
+
 ## 0.1.2 - 2025-04-09
 
 Drops compatibility with IDEA 22, Adds compatibility with IDEA 51

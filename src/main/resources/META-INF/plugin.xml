@@ -2,7 +2,7 @@
 <idea-plugin>
     <id>com.github.asm0dey.typewriterplugin</id>
     <name>TypeWriter</name>
-    <vendor>asm0dey</vendor>
+    <vendor url="https://github.com/migus88/typewriter-plugin">Engine Room Games</vendor>
 
     <depends>com.intellij.modules.platform</depends>
 
