@@ -2,6 +2,7 @@ package com.github.asm0dey.typewriterplugin
 
 import com.github.asm0dey.typewriterplugin.TypeWriterBundle.message
 import com.intellij.icons.AllIcons
+import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.components.service
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.Editor
@@ -21,13 +22,18 @@ import com.intellij.openapi.wm.IdeFocusManager
 import com.intellij.testFramework.LightVirtualFile
 import com.intellij.ui.EditorTextField
 import com.intellij.ui.SimpleListCellRenderer
+import com.intellij.ui.components.JBList
+import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTabbedPane
 import com.intellij.ui.dsl.builder.*
+import com.intellij.util.ui.JBUI
+import com.intellij.util.ui.UIUtil
 import java.awt.BorderLayout
 import java.awt.Component
 import java.awt.Container
 import java.awt.Dimension
 import java.awt.FlowLayout
+import java.awt.Font
 import java.awt.Insets
 import java.awt.event.ActionEvent
 import java.awt.event.FocusAdapter
@@ -42,6 +48,8 @@ import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.JPanel
 import javax.swing.JTextField
+import javax.swing.ListCellRenderer
+import javax.swing.ListSelectionModel
 import javax.swing.SwingUtilities
 
 class TypeWriterDialog(private val project: Project) :
@@ -65,6 +73,25 @@ class TypeWriterDialog(private val project: Project) :
     private val tabbedPane = JBTabbedPane()
     private val languageCombo: ComboBox<FileType> = ComboBox(textFileTypes())
     private val addTabButton: JButton = JButton(message("dialog.add.tab"), AllIcons.General.Add)
+
+    private val templateList: JBList<TemplateEntry> = JBList(TemplateKind.entries.map { TemplateEntry(it) }).apply {
+        selectionMode = ListSelectionModel.SINGLE_SELECTION
+        cellRenderer = makeTemplateRenderer()
+        addMouseListener(object : MouseAdapter() {
+            override fun mouseClicked(e: MouseEvent) {
+                if (e.clickCount == 2 && SwingUtilities.isLeftMouseButton(e)) {
+                    selectedValue?.let { insertTemplate(it) }
+                }
+            }
+        })
+        addKeyListener(object : KeyAdapter() {
+            override fun keyPressed(e: KeyEvent) {
+                if (e.keyCode == KeyEvent.VK_ENTER) {
+                    selectedValue?.let { insertTemplate(it) }
+                }
+            }
+        })
+    }
 
     private val stopAction: Action = object : DialogWrapperAction(message("dialog.stop")) {
         override fun doAction(e: ActionEvent) {
@@ -323,8 +350,72 @@ class TypeWriterDialog(private val project: Project) :
                 checkBox(message("dialog.keep.open"))
                     .bindSelected(::keepOpen)
             }
+            row {
+                label(message("dialog.templates.title"))
+            }.topGap(TopGap.MEDIUM)
+            row {
+                cell(JBScrollPane(templateList).apply {
+                    preferredSize = Dimension(0, 96)
+                })
+                    .align(Align.FILL)
+                    .resizableColumn()
+            }
         }
         return dialogPanel
+    }
+
+    /**
+     * Renders each template entry on a single row: monospaced syntax on the left, dimmed
+     * description on the right. The syntax string is rebuilt on each paint using the *current*
+     * `openingSequence` / `closingSequence`, so if the user changes the markers the list reflects
+     * it without explicit refreshing.
+     */
+    private fun makeTemplateRenderer(): ListCellRenderer<in TemplateEntry> =
+        ListCellRenderer { list, value, _, selected, _ ->
+            val panel = JPanel(BorderLayout()).apply {
+                isOpaque = true
+                background = if (selected) list.selectionBackground else list.background
+                border = JBUI.Borders.empty(4, 8)
+            }
+            val syntax = JLabel(value.render(openingSequence, closingSequence)).apply {
+                font = Font(Font.MONOSPACED, Font.PLAIN, font.size)
+                foreground = if (selected) list.selectionForeground else list.foreground
+            }
+            val desc = JLabel(message(value.kind.descriptionKey)).apply {
+                foreground = if (selected) list.selectionForeground else UIUtil.getInactiveTextColor()
+                border = JBUI.Borders.emptyLeft(12)
+            }
+            panel.add(syntax, BorderLayout.WEST)
+            panel.add(desc, BorderLayout.CENTER)
+            panel
+        }
+
+    /**
+     * Insert the template at the active tab's caret using the current marker settings, then
+     * focus the editor field so the user can keep typing.
+     */
+    private fun insertTemplate(entry: TemplateEntry) {
+        val state = tabsState[activeTabIndex]
+        val syntax = entry.render(openingSequence, closingSequence)
+        val ed = state.editorField.editor
+        WriteCommandAction.runWriteCommandAction(project) {
+            val doc = state.editorField.document
+            val offset = ed?.caretModel?.primaryCaret?.offset ?: doc.textLength
+            doc.insertString(offset, syntax)
+            ed?.caretModel?.primaryCaret?.moveToOffset(offset + syntax.length)
+        }
+        state.editorField.requestFocusInWindow()
+    }
+
+    private enum class TemplateKind(val pattern: String, val descriptionKey: String) {
+        PAUSE("{O}pause:1000{C}", "template.pause.description"),
+        REFORMAT("{O}reformat{C}", "template.reformat.description"),
+        COMPLETE("{O}complete:3:Word{C}", "template.complete.description"),
+    }
+
+    private class TemplateEntry(val kind: TemplateKind) {
+        fun render(open: String, close: String): String =
+            kind.pattern.replace("{O}", open).replace("{C}", close)
     }
 
     override fun createActions(): Array<Action> = arrayOf(okAction, stopAction, cancelAction)

@@ -90,6 +90,8 @@ Templates are inline directives in the source text, wrapped in the configured op
 
 `completionDelay` is a global setting (`TypeWriterSettings.completionDelay`, exposed in the dialog). Per-`{_complete_}` config is just the `N` argument.
 
+The dialog itself surfaces the available templates in a **Templates** `JBList` at the bottom. Each entry is a `TemplateEntry(kind)` where `kind` is the `TemplateKind` enum (`PAUSE`, `REFORMAT`, `COMPLETE`). The list's cell renderer rebuilds the syntax string on every paint by reading the live `openingSequence`/`closingSequence` properties — so when the user changes the marker text fields the list re-renders in sync without explicit listeners. Double-click or Enter calls `insertTemplate(entry)`, which writes the rendered syntax at the active tab's caret inside a `WriteCommandAction` and re-focuses the editor field.
+
 ### Focus and caret visibility
 
 The dialog is a separate window from the IDE. `Component.requestFocusInWindow()` only moves focus *within* a window — useless for going from the dialog back to the editor. Use `IdeFocusManager.getInstance(project).requestFocus(component, /*forced=*/true)` instead.

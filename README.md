@@ -23,6 +23,8 @@ Special commands can be included in your text using the template syntax:
 - `{_reformat_}` - Reformats the code at the current position
 - `{_complete:N:Word_}` - Imitates auto-completion: types `N` characters of `Word`, triggers the IDE's IntelliSense popup, waits for the **Completion delay** configured in the dialog, then drops the rest of `Word` in one chunk
 
+The dialog has a **Templates** list at the bottom — double-click an entry (or select and press Enter) to insert it into the active tab at the cursor. The entries follow whatever opening/closing markers you've configured.
+
 The opening/closing markers are configurable in the dialog if `{_` / `_}` collides with your content.
 
 <!-- Plugin description end -->
