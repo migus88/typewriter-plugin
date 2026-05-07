@@ -86,11 +86,14 @@ Templates are inline directives in the source text, wrapped in the configured op
 
 - `{{pause:N}}` — `PauseCommand(N)` (milliseconds).
 - `{{reformat}}` — `ReformatCommand`.
-- `{{complete:N:Word}}` — auto-completion imitation. Splits the args body again on the first `:` so `Word` can contain anything (including more colons). Expands to: `WriteTextCommand(prefix)` for the first `N` chars, then `TriggerAutocompleteCommand(completionDelay)` to surface the IDE's popup, wait, and **dismiss it**, then `WriteTextCommand(rest)` for the tail — visually the same shape as a user typing a few chars and accepting a suggestion.
+- `{{complete:N:Word}}` — auto-completion imitation. Splits the args body again on the first `:` so `Word` can contain anything (including more colons). Expands to: `WriteTextCommand(prefix)` for the first `N` chars, then `TriggerAutocompleteCommand(completionDelay)` to pause and dismiss whatever popup is showing, then `WriteTextCommand(rest)` for the tail — visually the same shape as a user typing a few chars and accepting a suggestion.
 
-  **Two gotchas burned into this code:**
+  **Three gotchas burned into this code:**
   1. The raw body is *not* trimmed before splitting. Trimming would eat trailing whitespace inside the marker (e.g. `{{complete:3:private }}` is the user asking for `"private "`). Only `name`, the `pause` value, and the `complete:N` argument are trimmed individually.
-  2. `TriggerAutocompleteCommand` *dismisses* the lookup at the end of its sleep. Leaving the lookup alive made the next `WriteTextCommand` ' s leading space disappear — IntelliJ's lookup treats space as an accept-and-consume completion character, eating the typed character whole.
+  2. `TriggerAutocompleteCommand` *dismisses* the lookup at the end of its sleep. Leaving the lookup alive made the next `WriteTextCommand`'s leading space disappear — IntelliJ's lookup treats space as an accept-and-consume completion character, eating the typed character whole.
+  3. **Don't call `CodeCompletionHandlerBase.invokeCompletion` here.** It inserts a dummy identifier into the document during prefix analysis and rolls it back; the round-trip kicks Rider's typing-assist / ReSharper formatter into shuffling whitespace around the typed word (the symptom we kept seeing was a leading space appearing and the internal one disappearing — `private readonly` arriving as ` privatereadonly`). Surface the popup via `WriteTextCommand`'s `scheduleAutoPopup` hint instead, and just *wait* in this command.
+
+The popup itself is kept alive during typing by `WriteTextCommand` calling `AutoPopupController.getInstance(project).scheduleAutoPopup(editor)` after every insert. That's the same code path the IDE's own typed-handler uses, so the popup behaves like it does for a real user — it appears when the user pauses on an identifier, filters as more characters arrive, and dismisses on non-matching characters.
 
 `completionDelay` is a global setting (`TypeWriterSettings.completionDelay`, exposed in the dialog). Per-`{{complete}}` config is just the `N` argument.
 
