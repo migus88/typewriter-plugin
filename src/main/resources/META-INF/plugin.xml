@@ -1,13 +1,13 @@
 <!-- Plugin Configuration File. Read more: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
 <idea-plugin>
-    <id>com.github.asm0dey.typewriterplugin</id>
+    <id>games.engine-room.typewriter</id>
     <name>TypeWriter</name>
     <vendor url="https://github.com/migus88/typewriter-plugin">Engine Room Games</vendor>
 
     <depends>com.intellij.modules.platform</depends>
 
     <actions resource-bundle="messages.TypeWriterBundle">
-        <action id="com.github.asm0dey.typewriterplugin.TypeWriterAction"
+        <action id="games.engine-room.typewriter.TypeWriterAction"
                 class="com.github.asm0dey.typewriterplugin.TypeWriterAction"
                 text="TypeWriter">
             <keyboard-shortcut first-keystroke="control shift W" keymap="$default"/>
