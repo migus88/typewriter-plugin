@@ -51,6 +51,8 @@ import javax.swing.JTextField
 import javax.swing.ListCellRenderer
 import javax.swing.ListSelectionModel
 import javax.swing.SwingUtilities
+import javax.swing.event.DocumentEvent
+import javax.swing.event.DocumentListener
 
 class TypeWriterDialog(private val project: Project) :
     DialogWrapper(project, true, IdeModalityType.MODELESS) {
@@ -100,6 +102,8 @@ class TypeWriterDialog(private val project: Project) :
     }.also { it.isEnabled = false }
 
     private lateinit var dialogPanel: DialogPanel
+    private lateinit var openingField: JTextField
+    private lateinit var closingField: JTextField
 
     init {
         // Build initial tabs from persisted state, falling back to a single empty default.
@@ -141,6 +145,24 @@ class TypeWriterDialog(private val project: Project) :
         setOKButtonText(message("dialog.start"))
         setCancelButtonText(message("dialog.close"))
         init()
+
+        // The kotlin UI DSL's `bindText` only flushes to the bound property on `apply()` —
+        // typing in the markers fields won't update `openingSequence` / `closingSequence` until
+        // OK. The templates list and the insert action both need *live* values, so we hook a
+        // DocumentListener that mirrors the field text into the property and forces the list
+        // to repaint with each keystroke.
+        val markerListener = object : DocumentListener {
+            override fun insertUpdate(e: DocumentEvent) = sync()
+            override fun removeUpdate(e: DocumentEvent) = sync()
+            override fun changedUpdate(e: DocumentEvent) = sync()
+            private fun sync() {
+                openingSequence = openingField.text
+                closingSequence = closingField.text
+                templateList.repaint()
+            }
+        }
+        openingField.document.addDocumentListener(markerListener)
+        closingField.document.addDocumentListener(markerListener)
     }
 
     // ── Tab management ──────────────────────────────────────────────────────────────────────
@@ -168,8 +190,23 @@ class TypeWriterDialog(private val project: Project) :
     private fun makeTabHeader(state: TabState): JComponent {
         val panel = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0))
         panel.isOpaque = false
+
+        // JTabbedPane only sees clicks that land directly on itself — clicks on a custom tab
+        // header's children go to the children. Without this listener, single-clicking the tab
+        // *name* doesn't switch tabs because the JLabel intercepts the click.
+        val selectListener = object : MouseAdapter() {
+            override fun mouseClicked(e: MouseEvent) {
+                if (e.clickCount == 1 && SwingUtilities.isLeftMouseButton(e)) {
+                    val idx = tabsState.indexOf(state)
+                    if (idx >= 0) tabbedPane.selectedIndex = idx
+                }
+            }
+        }
+        panel.addMouseListener(selectListener)
+
         val label = JLabel(state.name).apply {
             toolTipText = message("dialog.rename.tab.tooltip")
+            addMouseListener(selectListener)
             addMouseListener(object : MouseAdapter() {
                 override fun mouseClicked(e: MouseEvent) {
                     if (e.clickCount == 2 && SwingUtilities.isLeftMouseButton(e)) {
@@ -329,14 +366,16 @@ class TypeWriterDialog(private val project: Project) :
                 label(message("dialog.ms"))
             }
             row(message("dialog.template.markers")) {
-                textField()
+                openingField = textField()
                     .columns(4)
                     .bindText(::openingSequence)
+                    .component
                 @Suppress("DialogTitleCapitalization")
                 label("…")
-                textField()
+                closingField = textField()
                     .columns(4)
                     .bindText(::closingSequence)
+                    .component
             }
             row {
                 intTextField(IntRange(0, 10000), 4)

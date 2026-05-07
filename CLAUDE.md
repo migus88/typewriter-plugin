@@ -94,7 +94,9 @@ Templates are inline directives in the source text, wrapped in the configured op
 
 `completionDelay` is a global setting (`TypeWriterSettings.completionDelay`, exposed in the dialog). Per-`{_complete_}` config is just the `N` argument.
 
-The dialog itself surfaces the available templates in a **Templates** `JBList` at the bottom. Each entry is a `TemplateEntry(kind)` where `kind` is the `TemplateKind` enum (`PAUSE`, `REFORMAT`, `COMPLETE`). The list's cell renderer rebuilds the syntax string on every paint by reading the live `openingSequence`/`closingSequence` properties — so when the user changes the marker text fields the list re-renders in sync without explicit listeners. Double-click or Enter calls `insertTemplate(entry)`, which writes the rendered syntax at the active tab's caret inside a `WriteCommandAction` and re-focuses the editor field.
+The dialog itself surfaces the available templates in a **Templates** `JBList` at the bottom. Each entry is a `TemplateEntry(kind)` where `kind` is the `TemplateKind` enum (`PAUSE`, `REFORMAT`, `COMPLETE`). The list's cell renderer rebuilds the syntax string on every paint by reading the live `openingSequence`/`closingSequence` properties. Double-click or Enter calls `insertTemplate(entry)`, which writes the rendered syntax at the active tab's caret inside a `WriteCommandAction` and re-focuses the editor field.
+
+  **bindText gotcha:** the kotlin UI DSL's `bindText(::property)` only flushes the field's value to the bound property on `panel.apply()` — i.e., on OK. Reading `openingSequence` mid-edit gives you the *original* value, not what the user just typed. The dialog therefore captures `openingField` / `closingField` references and installs a `DocumentListener` that mirrors each keystroke into both properties **and** repaints `templateList`. Without this, the templates list and the inserted syntax both go stale.
 
 ### Focus and caret visibility
 
@@ -157,6 +159,8 @@ UI is built with the IntelliJ Kotlin UI DSL (`panel { row { ... } }`). It is **n
 - `closeTab(state)` removes the tab; refuses if it's the last one.
 - `nextTabName()` finds the highest `Tab N` integer in current names and adds one.
 - `beginInlineRename(header, label, state)` swaps the tab's `JLabel` for a `JTextField` on double-click. Enter / focus loss commits, Escape cancels. Both the new name and the `JTabbedPane` title are updated, and persistence on dispose picks up the change.
+
+**Tab selection gotcha:** when a JTabbedPane has a custom tab component (our `JPanel` with label + close button), `JTabbedPane`'s built-in click-to-select listener doesn't fire on clicks that land on the children — Swing dispatches the click straight to the child. Without an explicit listener, clicking the tab *name* fails to switch tabs even though clicking the gap around the name works. The `selectListener` `MouseAdapter` is attached to both the panel and the label; on a single left-click it programmatically sets `tabbedPane.selectedIndex` to this tab's index.
 
 Per-tab data persists via `TabData` (`name`, `text`, `fileTypeName`). The dialog rebuilds tabs from `settings.tabs` on construction; `persistSettings()` flushes them on dispose / OK.
 
