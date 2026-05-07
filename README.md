@@ -10,7 +10,7 @@ This plugin implements functionality usually requested by people, who record vid
 
 Hit <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd> (or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd> on Windows/Linux) to open the TypeWriter window. Author your text in a real code editor (with completion, brace matching, and syntax highlighting for any installed language), pick a language, and click **Start typing** — the IDE will then autotype your text into whatever editor is in focus.
 
-The dialog is non-modal, so you can leave it open on a second screen and watch the typing happen in your code editor. **Tabs** at the top let you keep multiple scripts ready at once — click **New tab** to add one, click the × on a tab to close it. Each tab has its own text and language; the rest of the settings (delay, markers, etc.) are shared.
+The dialog is non-modal, so you can leave it open on a second screen and watch the typing happen in your code editor. **Tabs** at the top let you keep multiple scripts ready at once — click **New tab** to add one, double-click a tab name to rename it, click the × on a tab to close it. Each tab has its own text and language; the rest of the settings (delay, markers, etc.) are shared.
 
 Two run modes, controlled by the **Keep window open after starting** checkbox:
 - **Off (default)**: clicking Start closes the window first, then types into the editor. Focus stays on the editor.

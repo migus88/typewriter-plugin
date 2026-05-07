@@ -29,11 +29,19 @@ import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Insets
 import java.awt.event.ActionEvent
+import java.awt.event.FocusAdapter
+import java.awt.event.FocusEvent
+import java.awt.event.KeyAdapter
+import java.awt.event.KeyEvent
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
 import javax.swing.Action
 import javax.swing.JButton
 import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.JPanel
+import javax.swing.JTextField
+import javax.swing.SwingUtilities
 
 class TypeWriterDialog(private val project: Project) :
     DialogWrapper(project, true, IdeModalityType.MODELESS) {
@@ -131,7 +139,17 @@ class TypeWriterDialog(private val project: Project) :
     private fun makeTabHeader(state: TabState): JComponent {
         val panel = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0))
         panel.isOpaque = false
-        panel.add(JLabel(state.name))
+        val label = JLabel(state.name).apply {
+            toolTipText = message("dialog.rename.tab.tooltip")
+            addMouseListener(object : MouseAdapter() {
+                override fun mouseClicked(e: MouseEvent) {
+                    if (e.clickCount == 2 && SwingUtilities.isLeftMouseButton(e)) {
+                        e.consume()
+                        beginInlineRename(panel, this@apply, state)
+                    }
+                }
+            })
+        }
         val close = JButton(AllIcons.Actions.Close).apply {
             rolloverIcon = AllIcons.Actions.CloseHovered
             isFocusable = false
@@ -142,8 +160,56 @@ class TypeWriterDialog(private val project: Project) :
             toolTipText = message("dialog.close.tab")
             addActionListener { closeTab(state) }
         }
+        panel.add(label)
         panel.add(close)
         return panel
+    }
+
+    /**
+     * Swap the tab's label out for a [JTextField] and let the user type a new name. Enter (or
+     * focus loss) commits, Escape cancels. The header keeps its close button throughout.
+     */
+    private fun beginInlineRename(header: JPanel, label: JLabel, state: TabState) {
+        val close = header.components.find { it is JButton } ?: return
+        val field = JTextField(state.name).apply {
+            columns = state.name.length.coerceAtLeast(8)
+        }
+
+        var finished = false
+        fun finish(commit: Boolean) {
+            if (finished) return
+            finished = true
+            if (commit) {
+                val newName = field.text.trim().ifBlank { state.name }
+                state.name = newName
+                label.text = newName
+                val idx = tabsState.indexOf(state)
+                if (idx >= 0) tabbedPane.setTitleAt(idx, newName)
+            }
+            header.removeAll()
+            header.add(label)
+            header.add(close)
+            header.revalidate()
+            header.repaint()
+        }
+
+        field.addActionListener { finish(true) }
+        field.addFocusListener(object : FocusAdapter() {
+            override fun focusLost(e: FocusEvent) = finish(true)
+        })
+        field.addKeyListener(object : KeyAdapter() {
+            override fun keyPressed(e: KeyEvent) {
+                if (e.keyCode == KeyEvent.VK_ESCAPE) finish(false)
+            }
+        })
+
+        header.removeAll()
+        header.add(field)
+        header.add(close)
+        header.revalidate()
+        header.repaint()
+        field.requestFocusInWindow()
+        field.selectAll()
     }
 
     private fun createNewTabState(): TabState {

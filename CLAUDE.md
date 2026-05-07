@@ -130,6 +130,7 @@ UI is built with the IntelliJ Kotlin UI DSL (`panel { row { ... } }`). It is **n
 - `addNewTab()` appends a `TabState`, registers a new tab + custom header, selects it.
 - `closeTab(state)` removes the tab; refuses if it's the last one.
 - `nextTabName()` finds the highest `Tab N` integer in current names and adds one.
+- `beginInlineRename(header, label, state)` swaps the tab's `JLabel` for a `JTextField` on double-click. Enter / focus loss commits, Escape cancels. Both the new name and the `JTabbedPane` title are updated, and persistence on dispose picks up the change.
 
 Per-tab data persists via `TabData` (`name`, `text`, `fileTypeName`). The dialog rebuilds tabs from `settings.tabs` on construction; `persistSettings()` flushes them on dispose / OK.
 
