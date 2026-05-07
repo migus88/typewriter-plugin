@@ -1,6 +1,7 @@
 package com.github.asm0dey.typewriterplugin.commands
 
 import com.intellij.codeInsight.AutoPopupController
+import com.intellij.codeInsight.lookup.LookupManager
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.ScrollType
@@ -10,10 +11,10 @@ import com.intellij.openapi.editor.ScrollType
  * insert counts as a single typing tick — used to make line-leading indentation type as one
  * keystroke instead of one-per-space.
  *
- * Each tick also schedules the IDE's auto-popup, which keeps the IntelliSense suggestion
- * window responsive during typing the way it would be for a real user. The IDE's own
- * machinery decides when to actually display it; calling [AutoPopupController.scheduleAutoPopup]
- * is just a hint.
+ * Each tick may schedule the IDE's auto-popup so the IntelliSense suggestion window stays
+ * responsive during typing. We only call [AutoPopupController.scheduleAutoPopup] when no
+ * lookup is currently active — calling it while a popup is already up resets the alarm and
+ * causes the popup to flicker (close-and-reopen) on every keystroke.
  */
 class WriteTextCommand(
     private val text: String,
@@ -29,8 +30,9 @@ class WriteTextCommand(
             document.insertString(offset, text)
             caret.moveToOffset(offset + text.length)
             editor.scrollingModel.scrollToCaret(ScrollType.RELATIVE)
-            editor.project?.let {
-                AutoPopupController.getInstance(it).scheduleAutoPopup(editor)
+            val project = editor.project
+            if (project != null && LookupManager.getActiveLookup(editor) == null) {
+                AutoPopupController.getInstance(project).scheduleAutoPopup(editor)
             }
         }
         Thread.sleep(pauseAfter.toLong())
