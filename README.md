@@ -8,17 +8,15 @@
 
 This plugin implements functionality usually requested by people, who record videos of some code features.
 
-By hitting <kbd>Ctrl</kbd>(<kbd>Cmd</kbd> fpr Mac)+<kbd>T</kbd>,<kbd>W</kbd> you can call a typewriter plugin window, where you can type text. This text will be then autotyped in IDE with a given speed.
+Hit <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd> (or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd> on Windows/Linux) to open the TypeWriter window. Author your text in a real code editor (with completion, brace matching, and syntax highlighting for any installed language), pick a language, and click **Start typing** — the IDE will then autotype your text into whatever editor is in focus.
+
+The dialog is non-modal, so you can leave it open on a second screen and watch the typing happen in your code editor. While a run is in progress the dialog freezes its inputs and the **Stop** button becomes available. Toggle **Keep window open after starting** to keep it around between runs. Your text and settings are remembered across IDE restarts.
 
 Special commands can be included in your text using the template syntax:
-- `<pause:1000>` - Pauses typing for 1000 milliseconds
-- `<reformat>` - Reformats the code at the current position
+- `{_pause:1000_}` - Pauses typing for 1000 milliseconds
+- `{_reformat_}` - Reformats the code at the current position
 
-You can also assign shortcuts to frequently used snippets:
-1. Enter a shortcut in the "Shortcut" field when creating a snippet
-2. The snippet will be saved and can be executed directly using the assigned shortcut
-3. Manage your snippets by clicking the "Manage Snippets" button in the TypeWriter dialog
-4. You can also access all your snippets by pressing <kbd>Ctrl</kbd>(<kbd>Cmd</kbd> for Mac)+<kbd>T</kbd>,<kbd>S</kbd>
+The opening/closing markers are configurable in the dialog if `{_` / `_}` collides with your content.
 
 <!-- Plugin description end -->
 

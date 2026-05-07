@@ -30,7 +30,15 @@ dependencies {
 
     // IntelliJ Platform Gradle Plugin Dependencies Extension - read more: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin-dependencies-extension.html
     intellijPlatform {
-        intellijIdea(providers.gradleProperty("platformVersion"))
+        val localPath = providers.gradleProperty("localPlatformPath").orNull
+        if (!localPath.isNullOrBlank() && file(localPath).exists()) {
+            local(localPath)
+        } else {
+            create(
+                providers.gradleProperty("platformType"),
+                providers.gradleProperty("platformVersion"),
+            )
+        }
 
         // Plugin Dependencies. Uses `platformBundledPlugins` property from the gradle.properties file for bundled IntelliJ Platform plugins.
 //        bundledPlugins(providers.gradleProperty("platformBundledPlugins").map { it.split(',') })
