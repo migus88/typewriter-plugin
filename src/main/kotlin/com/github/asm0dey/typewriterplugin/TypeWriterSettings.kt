@@ -5,6 +5,9 @@ import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.State
 import com.intellij.openapi.components.Storage
 import com.intellij.util.xmlb.XmlSerializerUtil
+import com.intellij.util.xmlb.annotations.Attribute
+import com.intellij.util.xmlb.annotations.Tag
+import com.intellij.util.xmlb.annotations.XCollection
 
 /**
  * Application-level settings store for the TypeWriter dialog. Survives IDE restart so users don't
@@ -21,7 +24,15 @@ import com.intellij.util.xmlb.XmlSerializerUtil
     storages = [Storage("typewriter.xml")],
 )
 class TypeWriterSettings : PersistentStateComponent<TypeWriterSettings> {
+
+    /**
+     * `@XCollection(style = v2)` is required — without it IntelliJ's `XmlSerializer` doesn't
+     * reliably round-trip a `MutableList` of custom-class items, and tabs silently revert to
+     * their defaults on the next session.
+     */
+    @get:XCollection(style = XCollection.Style.v2)
     var tabs: MutableList<TabData> = mutableListOf()
+
     var activeTabIndex: Int = 0
     var delay: Int = TypeWriterConstants.defaultDelay
     var jitter: Int = TypeWriterConstants.defaultJitter
@@ -51,11 +62,17 @@ class TypeWriterSettings : PersistentStateComponent<TypeWriterSettings> {
 }
 
 /**
- * Per-tab persistence record. Plain class (not a `data class`) so IntelliJ's XmlSerializer can
- * round-trip it via reflection without needing `@JvmOverloads` on a generated constructor.
+ * Per-tab persistence record. `@Tag` gives the element a stable name; `@Attribute` keeps the
+ * short fields on the element instead of nested `<option>` blocks. The script body uses the
+ * default nested-tag form so multi-line content survives intact.
  */
+@Tag("tab")
 class TabData {
+    @get:Attribute("name")
     var name: String = "Tab"
-    var text: String = ""
+
+    @get:Attribute("fileType")
     var fileTypeName: String = ""
+
+    var text: String = ""
 }

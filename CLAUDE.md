@@ -170,8 +170,10 @@ Per-tab data persists via `TabData` (`name`, `text`, `fileTypeName`). The dialog
 
 Application-level `PersistentStateComponent` (`@Service(APP)`, stored in `typewriter.xml`). Holds:
 - `tabs: MutableList<TabData>` and `activeTabIndex: Int` — per-tab state.
-- `delay`, `jitter`, `openingSequence`, `closingSequence`, `keepOpen` — shared across tabs.
+- `delay`, `jitter`, `openingSequence`, `closingSequence`, `keepOpen`, `completionDelay` — shared across tabs.
 - `text` and `fileTypeName` — *legacy* fields. They stay on the class so old XML loads cleanly; `loadState` folds any non-empty legacy content into a single seed `TabData` and clears the originals.
+
+**Serialization gotcha:** the `tabs` field is annotated `@get:XCollection(style = XCollection.Style.v2)`. Without that, IntelliJ's `XmlSerializer` doesn't reliably round-trip a `MutableList<CustomClass>` — the list writes out, but the next session's `loadState` reads it back empty, and tabs silently revert. `TabData` itself uses `@Tag("tab")` for the element name and `@Attribute` on the short string fields, so a saved XML looks like `<tab name="..." fileType="..."><option name="text" value="..."/></tab>`.
 
 ### Module layout
 
