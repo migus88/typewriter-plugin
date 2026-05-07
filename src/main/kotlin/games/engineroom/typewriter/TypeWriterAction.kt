@@ -1,11 +1,11 @@
-package com.github.asm0dey.typewriterplugin
+package games.engineroom.typewriter
 
-import com.github.asm0dey.typewriterplugin.commands.Command
-import com.github.asm0dey.typewriterplugin.commands.MoveCaretCommand
-import com.github.asm0dey.typewriterplugin.commands.PauseCommand
-import com.github.asm0dey.typewriterplugin.commands.ReformatCommand
-import com.github.asm0dey.typewriterplugin.commands.TriggerAutocompleteCommand
-import com.github.asm0dey.typewriterplugin.commands.WriteTextCommand
+import games.engineroom.typewriter.commands.Command
+import games.engineroom.typewriter.commands.MoveCaretCommand
+import games.engineroom.typewriter.commands.PauseCommand
+import games.engineroom.typewriter.commands.ReformatCommand
+import games.engineroom.typewriter.commands.TriggerAutocompleteCommand
+import games.engineroom.typewriter.commands.WriteTextCommand
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.editor.Editor

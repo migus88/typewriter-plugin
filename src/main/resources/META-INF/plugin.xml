@@ -8,7 +8,7 @@
 
     <actions resource-bundle="messages.TypeWriterBundle">
         <action id="games.engine-room.typewriter.TypeWriterAction"
-                class="com.github.asm0dey.typewriterplugin.TypeWriterAction"
+                class="games.engineroom.typewriter.TypeWriterAction"
                 text="TypeWriter">
             <keyboard-shortcut first-keystroke="control shift W" keymap="$default"/>
             <keyboard-shortcut first-keystroke="meta shift W" keymap="Mac OS X"/>

@@ -1,6 +1,6 @@
-package com.github.asm0dey.typewriterplugin
+package games.engineroom.typewriter
 
-import com.github.asm0dey.typewriterplugin.TypeWriterBundle.message
+import games.engineroom.typewriter.TypeWriterBundle.message
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.components.service

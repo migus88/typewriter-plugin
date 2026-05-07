@@ -1,4 +1,4 @@
-package com.github.asm0dey.typewriterplugin
+package games.engineroom.typewriter
 
 object TypeWriterConstants {
     const val defaultDelay = 50

@@ -1,4 +1,4 @@
-package com.github.asm0dey.typewriterplugin.commands
+package games.engineroom.typewriter.commands
 
 class PauseCommand(private val delay: Long) : Command {
 

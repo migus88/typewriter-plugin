@@ -1,6 +1,6 @@
 package org.jetbrains.plugins.template
 
-import com.github.asm0dey.typewriterplugin.TypeWriterAction
+import games.engineroom.typewriter.TypeWriterAction
 import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.DataContext

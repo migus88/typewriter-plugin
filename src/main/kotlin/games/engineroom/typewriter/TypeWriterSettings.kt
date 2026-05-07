@@ -1,4 +1,4 @@
-package com.github.asm0dey.typewriterplugin
+package games.engineroom.typewriter
 
 import com.intellij.openapi.components.PersistentStateComponent
 import com.intellij.openapi.components.Service
@@ -20,7 +20,7 @@ import com.intellij.util.xmlb.annotations.XCollection
  */
 @Service(Service.Level.APP)
 @State(
-    name = "com.github.asm0dey.typewriterplugin.TypeWriterSettings",
+    name = "games.engineroom.typewriter.TypeWriterSettings",
     storages = [Storage("typewriter.xml")],
 )
 class TypeWriterSettings : PersistentStateComponent<TypeWriterSettings> {

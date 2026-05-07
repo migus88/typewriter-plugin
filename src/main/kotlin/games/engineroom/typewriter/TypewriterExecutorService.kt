@@ -1,6 +1,6 @@
-package com.github.asm0dey.typewriterplugin
+package games.engineroom.typewriter
 
-import com.github.asm0dey.typewriterplugin.commands.Command
+import games.engineroom.typewriter.commands.Command
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service

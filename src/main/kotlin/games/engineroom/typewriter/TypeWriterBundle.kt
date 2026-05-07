@@ -1,4 +1,4 @@
-package com.github.asm0dey.typewriterplugin
+package games.engineroom.typewriter
 
 import com.intellij.DynamicBundle
 import org.jetbrains.annotations.NonNls

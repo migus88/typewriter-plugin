@@ -1,4 +1,4 @@
-package com.github.asm0dey.typewriterplugin.commands
+package games.engineroom.typewriter.commands
 
 import com.intellij.codeInsight.AutoPopupController
 import com.intellij.codeInsight.lookup.LookupManager
