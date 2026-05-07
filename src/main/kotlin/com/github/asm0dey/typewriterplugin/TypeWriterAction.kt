@@ -138,7 +138,7 @@ fun executeTyping(
     for (m in templateRegex.findAll(text)) {
         appendSegment(text.substring(lastEnd, m.range.first))
         // Don't trim the raw body — for `complete`, the word may legitimately contain leading
-        // or trailing whitespace (e.g. `{_complete:3:private _}` to type "private " followed by
+        // or trailing whitespace (e.g. `{{complete:3:private }}` to type "private " followed by
         // the next token). Trim only the bits we need numeric/keyword parsing for.
         val raw = m.value
             .substringAfter(openingSequence)
@@ -146,6 +146,7 @@ fun executeTyping(
         val firstColon = raw.indexOf(':')
         val name = (if (firstColon < 0) raw else raw.substring(0, firstColon)).trim()
         val rest = if (firstColon < 0) "" else raw.substring(firstColon + 1)
+        var consumedAfterTemplate = 0
         when (name) {
             "pause" -> commands += PauseCommand(rest.trim().toLongOrNull() ?: 0L)
             "reformat" -> commands += ReformatCommand(editor)
@@ -159,7 +160,33 @@ fun executeTyping(
                     if (word.isNotEmpty()) {
                         val effectiveN = n.coerceIn(0, word.length)
                         val prefix = word.substring(0, effectiveN)
-                        val tail = word.substring(effectiveN)
+                        var tail = word.substring(effectiveN)
+                        // Workaround for Rider's C# typing-assist: when the doc lands on
+                        // `<keyword> ` (keyword + trailing space) at any indent, the formatter
+                        // "fixes" the line by shuffling whitespace — moving a space from after
+                        // the keyword to the start of the line. To avoid the intermediate
+                        // doc state, absorb the next whitespace run + the immediately-following
+                        // non-whitespace char into the tail so the doc lands directly on
+                        // `<keyword> <next_char>` in one insert.
+                        val afterStart = m.range.last + 1
+                        var idx = afterStart
+                        val sb = StringBuilder()
+                        while (idx < text.length && text[idx] != '\n' && text[idx].isWhitespace()) {
+                            sb.append(text[idx])
+                            idx++
+                        }
+                        val wsLen = sb.length
+                        if (wsLen > 0 && idx < text.length && !text[idx].isWhitespace()) {
+                            sb.append(text[idx])
+                            idx++
+                        }
+                        // Only absorb when we got *both* whitespace and a non-whitespace
+                        // boundary char; otherwise the absorption doesn't avoid the bad
+                        // intermediate state, just delays it.
+                        if (sb.length > wsLen) {
+                            tail += sb.toString()
+                            consumedAfterTemplate = sb.length
+                        }
                         if (prefix.isNotEmpty()) commands += WriteTextCommand(prefix, pause(), editor)
                         commands += TriggerAutocompleteCommand(completionDelay, editor)
                         if (tail.isNotEmpty()) commands += WriteTextCommand(tail, pause(), editor)
@@ -167,7 +194,8 @@ fun executeTyping(
                 }
             }
         }
-        lastEnd = m.range.last + 1
+        lastEnd = m.range.last + 1 + consumedAfterTemplate
+        concatPos += consumedAfterTemplate
     }
     appendSegment(text.substring(lastEnd))
 
