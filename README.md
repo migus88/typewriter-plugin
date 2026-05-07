@@ -19,13 +19,13 @@ Two run modes, controlled by the **Keep window open after starting** checkbox:
 All your tabs and settings are remembered across IDE restarts.
 
 Special commands can be included in your text using the template syntax:
-- `{_pause:1000_}` - Pauses typing for 1000 milliseconds
-- `{_reformat_}` - Reformats the code at the current position
-- `{_complete:N:Word_}` - Imitates auto-completion: types `N` characters of `Word`, triggers the IDE's IntelliSense popup, waits for the **Completion delay** configured in the dialog, then drops the rest of `Word` in one chunk
+- `{{pause:1000}}` - Pauses typing for 1000 milliseconds
+- `{{reformat}}` - Reformats the code at the current position
+- `{{complete:N:Word}}` - Imitates auto-completion: types `N` characters of `Word`, triggers the IDE's IntelliSense popup, waits for the **Completion delay** configured in the dialog, then drops the rest of `Word` in one chunk
 
-The dialog has a **Templates** list at the bottom — double-click an entry (or select and press Enter) to insert it into the active tab at the cursor. The entries follow whatever opening/closing markers you've configured.
+The dialog has a **Templates** list at the top — double-click an entry (or select and press Enter) to insert it into the active tab at the cursor. The entries follow whatever opening/closing markers you've configured.
 
-The opening/closing markers are configurable in the dialog if `{_` / `_}` collides with your content.
+The opening/closing markers are configurable in the dialog if `{{` / `}}` collides with your content.
 
 <!-- Plugin description end -->
 

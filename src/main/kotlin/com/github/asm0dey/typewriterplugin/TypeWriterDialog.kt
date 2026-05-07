@@ -341,10 +341,20 @@ class TypeWriterDialog(private val project: Project) :
 
         dialogPanel = panel {
             row {
-                cell(toolbar)
+                label(message("dialog.templates.title"))
+            }
+            row {
+                cell(JBScrollPane(templateList).apply {
+                    preferredSize = Dimension(0, 96)
+                })
                     .align(Align.FILL)
                     .resizableColumn()
             }
+            row {
+                cell(toolbar)
+                    .align(Align.FILL)
+                    .resizableColumn()
+            }.topGap(TopGap.MEDIUM)
             row {
                 cell(tabbedPane)
                     .align(Align.FILL)
@@ -388,16 +398,6 @@ class TypeWriterDialog(private val project: Project) :
             row {
                 checkBox(message("dialog.keep.open"))
                     .bindSelected(::keepOpen)
-            }
-            row {
-                label(message("dialog.templates.title"))
-            }.topGap(TopGap.MEDIUM)
-            row {
-                cell(JBScrollPane(templateList).apply {
-                    preferredSize = Dimension(0, 96)
-                })
-                    .align(Align.FILL)
-                    .resizableColumn()
             }
         }
         return dialogPanel

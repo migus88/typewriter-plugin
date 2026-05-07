@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-JetBrains IDE plugin (IntelliJ Platform) that auto-types text into the editor at a configurable speed — used for screencasts/demos. Supports inline template commands (`<pause:1000>`, `<reformat>`).
+JetBrains IDE plugin (IntelliJ Platform) that auto-types text into the editor at a configurable speed — used for screencasts/demos. Supports inline template commands (`{{pause:1000}}`, `{{reformat}}`, `{{complete:N:Word}}`).
 
 - Plugin ID: `com.github.asm0dey.typewriterplugin`
 - Default development target: Rider 2025.3.1 (build 253) via local install at `/Applications/Rider.app/Contents`. The build also works against any IntelliJ Platform IDE — see "Targeting another IDE" below.
@@ -52,7 +52,7 @@ So:
 
 `executeTyping` in `TypeWriterAction.kt` is the single entry point. It:
 
-1. Strips template markers (default `{_…_}`) out of the input to produce a **code-only** view, then runs a stack-based bracket matcher over it (`classify`).
+1. Strips template markers (default `{{…}}`) out of the input to produce a **code-only** view, then runs a stack-based bracket matcher over it (`classify`).
 2. For every correctly-nested `{}`, `()`, `[]` pair, the matcher classifies each source position:
    - **opener** → `AutoPair` carrying the body's leading and trailing whitespace
    - **leading whitespace** between opener and body → `ConsumeOnly` (the auto-pair sequence already inserts these; the source-walker emits no command for them)
@@ -76,25 +76,25 @@ When the walker hits an opener, `emitAutoPair` lays the structure down left-to-r
 
 By the time step 5 finishes, the document holds the entire `opener + leading + trailing + closer` structure in its final shape, the caret is on the body line at the right column, and every step took its own delay-jitter pause. The body chars that follow type into the slot.
 
-The pairs map is computed against the template-stripped concat, so brackets split across template markers (`class X {\n{_pause:1000_}\n}`) still pair up.
+The pairs map is computed against the template-stripped concat, so brackets split across template markers (`class X {\n{{pause:1000}}\n}`) still pair up.
 
 Caveat: the matcher is naive char-level — it doesn't understand strings or comments. A `{` inside `"json: { foo }"` will get auto-paired, which is wrong. Teach the matcher to skip ranges between matched quote/comment delimiters if that becomes an issue.
 
 ### Template commands
 
-Templates are inline directives in the source text, wrapped in the configured opening/closing markers (default `{_` / `_}`). Parser splits on the *first* colon to get the command name; everything after is the args body, parsed per-command:
+Templates are inline directives in the source text, wrapped in the configured opening/closing markers (default `{{` / `}}`). Parser splits on the *first* colon to get the command name; everything after is the args body, parsed per-command:
 
-- `{_pause:N_}` — `PauseCommand(N)` (milliseconds).
-- `{_reformat_}` — `ReformatCommand`.
-- `{_complete:N:Word_}` — auto-completion imitation. Splits the args body again on the first `:` so `Word` can contain anything (including more colons). Expands to: `WriteTextCommand(prefix)` for the first `N` chars, then `TriggerAutocompleteCommand(completionDelay)` to surface the IDE's popup, wait, and **dismiss it**, then `WriteTextCommand(rest)` for the tail — visually the same shape as a user typing a few chars and accepting a suggestion.
+- `{{pause:N}}` — `PauseCommand(N)` (milliseconds).
+- `{{reformat}}` — `ReformatCommand`.
+- `{{complete:N:Word}}` — auto-completion imitation. Splits the args body again on the first `:` so `Word` can contain anything (including more colons). Expands to: `WriteTextCommand(prefix)` for the first `N` chars, then `TriggerAutocompleteCommand(completionDelay)` to surface the IDE's popup, wait, and **dismiss it**, then `WriteTextCommand(rest)` for the tail — visually the same shape as a user typing a few chars and accepting a suggestion.
 
   **Two gotchas burned into this code:**
-  1. The raw body is *not* trimmed before splitting. Trimming would eat trailing whitespace inside the marker (e.g. `{_complete:3:private _}` is the user asking for `"private "`). Only `name`, the `pause` value, and the `complete:N` argument are trimmed individually.
+  1. The raw body is *not* trimmed before splitting. Trimming would eat trailing whitespace inside the marker (e.g. `{{complete:3:private }}` is the user asking for `"private "`). Only `name`, the `pause` value, and the `complete:N` argument are trimmed individually.
   2. `TriggerAutocompleteCommand` *dismisses* the lookup at the end of its sleep. Leaving the lookup alive made the next `WriteTextCommand` ' s leading space disappear — IntelliJ's lookup treats space as an accept-and-consume completion character, eating the typed character whole.
 
-`completionDelay` is a global setting (`TypeWriterSettings.completionDelay`, exposed in the dialog). Per-`{_complete_}` config is just the `N` argument.
+`completionDelay` is a global setting (`TypeWriterSettings.completionDelay`, exposed in the dialog). Per-`{{complete}}` config is just the `N` argument.
 
-The dialog itself surfaces the available templates in a **Templates** `JBList` at the bottom. Each entry is a `TemplateEntry(kind)` where `kind` is the `TemplateKind` enum (`PAUSE`, `REFORMAT`, `COMPLETE`). The list's cell renderer rebuilds the syntax string on every paint by reading the live `openingSequence`/`closingSequence` properties. Double-click or Enter calls `insertTemplate(entry)`, which writes the rendered syntax at the active tab's caret inside a `WriteCommandAction` and re-focuses the editor field.
+The dialog itself surfaces the available templates in a **Templates** `JBList` at the top (above the language combo and tabs). Each entry is a `TemplateEntry(kind)` where `kind` is the `TemplateKind` enum (`PAUSE`, `REFORMAT`, `COMPLETE`). The list's cell renderer rebuilds the syntax string on every paint by reading the live `openingSequence`/`closingSequence` properties. Double-click or Enter calls `insertTemplate(entry)`, which writes the rendered syntax at the active tab's caret inside a `WriteCommandAction` and re-focuses the editor field.
 
   **bindText gotcha:** the kotlin UI DSL's `bindText(::property)` only flushes the field's value to the bound property on `panel.apply()` — i.e., on OK. Reading `openingSequence` mid-edit gives you the *original* value, not what the user just typed. The dialog therefore captures `openingField` / `closingField` references and installs a `DocumentListener` that mirrors each keystroke into both properties **and** repaints `templateList`. Without this, the templates list and the inserted syntax both go stale.
 
@@ -123,7 +123,7 @@ the moment the user's `{` is typed, the document already contains `{\n    \n}` w
 
 This also keeps the syntax tree balanced at every moment of the run, which is what allows the IDE's highlighter (lexer-based) and the daemon code analyzer (semantic) to keep up — typing into an open `{` with no closer leaves the parser in an "incomplete code" state and many language plugins delay analysis until the syntax recovers, which manifests as un-highlighted text mid-run.
 
-The pre-scan ignores template markers — so if your script is `class X {\n{_pause:1000_}\n}`, the `{` and `}` still pair up across the pause. Bracket-matching that fails (mismatched / unbalanced input) leaves the offending characters unclassified and they fall through to plain typing.
+The pre-scan ignores template markers — so if your script is `class X {\n{{pause:1000}}\n}`, the `{` and `}` still pair up across the pause. Bracket-matching that fails (mismatched / unbalanced input) leaves the offending characters unclassified and they fall through to plain typing.
 
 Caveat: the matcher is naive char-level — it doesn't understand strings or comments. A `{` inside `"json: { foo }"` will get auto-paired, which is wrong. If that becomes an issue, the next step is teaching the matcher to skip ranges between matched quote/comment delimiters.
 
