@@ -1,6 +1,9 @@
 package games.engineroom.typewriter
 
+import games.engineroom.typewriter.commands.CaretDirection
+import games.engineroom.typewriter.commands.CaretMoveByDirectionCommand
 import games.engineroom.typewriter.commands.Command
+import games.engineroom.typewriter.commands.ImportCommand
 import games.engineroom.typewriter.commands.MoveCaretCommand
 import games.engineroom.typewriter.commands.PauseCommand
 import games.engineroom.typewriter.commands.ReformatCommand
@@ -154,6 +157,66 @@ fun executeTyping(
         when (name) {
             "pause" -> commands += PauseCommand(rest.trim().toLongOrNull() ?: 0L)
             "reformat" -> commands += ReformatCommand(editor)
+            // "carret" is the misspelling-tolerant alias — the canonical name is "caret".
+            "caret", "carret" -> {
+                // Format: caret:DIRECTION:N — emit N single-step commands so each press takes a
+                // tick. Unknown direction or non-positive count is silently dropped.
+                val firstColon = rest.indexOf(':')
+                if (firstColon > 0) {
+                    val dirStr = rest.substring(0, firstColon).trim().lowercase()
+                    val countStr = rest.substring(firstColon + 1).trim()
+                    val count = countStr.toIntOrNull() ?: 0
+                    val direction = parseCaretDirection(dirStr)
+                    if (direction != null && count > 0) {
+                        repeat(count) {
+                            commands += CaretMoveByDirectionCommand(direction, pause(), editor)
+                        }
+                    }
+                }
+            }
+            "import" -> {
+                // Accepted forms (positional, all parts optional after the keyword):
+                //   {{import}}                       — auto, 0 delay, smart pick
+                //   {{import:300}}                   — auto, 300 ms popup, smart pick
+                //   {{import:Namespace}}             — explicit, 0 delay
+                //   {{import:300:Namespace}}         — explicit, 300 ms delay
+                //   {{import:300::2}}                — auto, 300 ms popup, second popup item
+                //   {{import:300:Namespace:2}}       — explicit (option index ignored)
+                //
+                // The first segment is treated as a delay only when it's purely digits, so
+                // `Foo.Bar` (no leading number) is interpreted as a namespace, not a delay.
+                val firstColon = rest.indexOf(':')
+                val (delayMs, ns, optIdx) = if (firstColon < 0) {
+                    val first = rest.trim()
+                    val asInt = first.toIntOrNull()
+                    if (asInt != null) Triple(asInt.toLong(), null, 0)
+                    else Triple(0L, first.ifBlank { null }, 0)
+                } else {
+                    val first = rest.substring(0, firstColon).trim()
+                    val afterFirst = rest.substring(firstColon + 1)
+                    val asInt = first.toIntOrNull()
+                    if (asInt == null) {
+                        // Whole rest is the namespace (preserves dotted/colon-bearing names).
+                        Triple(0L, rest.trim().ifBlank { null }, 0)
+                    } else {
+                        val secondColon = afterFirst.indexOf(':')
+                        val nsRaw = if (secondColon < 0) afterFirst else afterFirst.substring(0, secondColon)
+                        val afterSecond = if (secondColon < 0) "" else afterFirst.substring(secondColon + 1)
+                        val opt = afterSecond.trim().toIntOrNull()?.coerceAtLeast(1) ?: 0
+                        Triple(asInt.toLong(), nsRaw.trim().ifBlank { null }, opt)
+                    }
+                }
+                commands += ImportCommand(
+                    editor = editor,
+                    namespace = ns,
+                    visibleDelayMs = delayMs.coerceAtLeast(0L),
+                    optionIndex = optIdx,
+                    // Match the typewriter's base typing pace for the down-arrow animation —
+                    // each key step in the popup feels like a typed character.
+                    stepDelayMs = delay.toInt(),
+                    pauseAfter = pause(),
+                )
+            }
             "complete" -> {
                 // Format: complete:N:Word — type N chars of Word, trigger auto-popup, wait
                 // completionDelay ms, then drop the rest of Word in a single tick.
@@ -204,6 +267,14 @@ fun executeTyping(
     appendSegment(text.substring(lastEnd))
 
     scheduler.start(commands, onDone)
+}
+
+private fun parseCaretDirection(s: String): CaretDirection? = when (s) {
+    "up" -> CaretDirection.UP
+    "down" -> CaretDirection.DOWN
+    "left" -> CaretDirection.LEFT
+    "right" -> CaretDirection.RIGHT
+    else -> null
 }
 
 private fun isIndentChar(c: Char): Boolean = c == ' ' || c == '\t'

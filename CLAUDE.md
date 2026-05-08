@@ -4,9 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-JetBrains IDE plugin (IntelliJ Platform) that auto-types text into the editor at a configurable speed — used for screencasts/demos. Supports inline template commands (`{{pause:1000}}`, `{{reformat}}`, `{{complete:N:Word}}`).
+JetBrains IDE plugin (IntelliJ Platform) that auto-types text into the editor at a configurable speed — used for screencasts/demos. Supports inline template commands (`{{pause:1000}}`, `{{reformat}}`, `{{complete:N:Word}}`, `{{import:N::K}}`, `{{import:N:Namespace}}`, `{{caret:DIR:N}}`).
 
-- Plugin ID: `com.github.asm0dey.typewriterplugin`
+- Plugin ID: `games.engine-room.typewriter`
+- Kotlin package: `games.engineroom.typewriter`
 - Default development target: Rider 2025.3.1 (build 253) via local install at `/Applications/Rider.app/Contents`. The build also works against any IntelliJ Platform IDE — see "Targeting another IDE" below.
 - Kotlin 2.3 / JVM toolchain 21
 - Build system: Gradle (Kotlin DSL) + IntelliJ Platform Gradle Plugin 2.x
@@ -97,7 +98,31 @@ Templates are inline directives in the source text, wrapped in the configured op
 
 `completionDelay` is a global setting (`TypeWriterSettings.completionDelay`, exposed in the dialog). Per-`{{complete}}` config is just the `N` argument.
 
-The dialog itself surfaces the available templates in a **Templates** `JBList` at the top (above the language combo and tabs). Each entry is a `TemplateEntry(kind)` where `kind` is the `TemplateKind` enum (`PAUSE`, `REFORMAT`, `COMPLETE`). The list's cell renderer rebuilds the syntax string on every paint by reading the live `openingSequence`/`closingSequence` properties. Double-click or Enter calls `insertTemplate(entry)`, which writes the rendered syntax at the active tab's caret inside a `WriteCommandAction` and re-focuses the editor field.
+### `{{import}}` — driving Rider's Alt+Enter popup
+
+`ImportCommand` has two modes, picked by whether `namespace` is null:
+
+- **Auto** (`namespace == null`) — drives the IDE's actual Alt+Enter intentions popup. The flow:
+  1. Hide any active auto-completion `Lookup`. The completion popup is otherwise alive while the typewriter types identifiers, and (a) it occludes the intentions popup visually, (b) it offers a `LookupList` JList that our popup-discovery would mistake for the intentions list. Hide it before dispatching.
+  2. **Wait for the daemon** to flag a diagnostic at the caret. We don't sleep a fixed amount — we explicitly call `DaemonCodeAnalyzer.restart(virtualFile)` to bypass ReSharper's debounce, then poll `DocumentMarkupModel.forDocument(...).allHighlighters` every 100ms looking for a `HighlightInfo.fromRangeHighlighter(...)` with `severity ≥ WARNING` whose range contains the caret offset. Up to a 3-second budget; on timeout we proceed anyway. **This is the difference between Rider's general "Create type / Refactor / …" popup (image 2 in PR discussion) and the focused import-only popup (image 3).** Without the wait, ReSharper hasn't told the popup what's wrong with the symbol, so Rider falls back to the general view.
+  3. **Dispatch Alt+Enter via `IdeEventQueue.postEvent`**, *not* `component.dispatchEvent`. The latter delivers the event directly to the focused component, bypassing `IdeKeyEventDispatcher` (the layer that consults the keymap and routes Alt+Enter to `ShowIntentionActions`). We were stuck on this for a while — `ActionManager.tryToExecute` and `component.dispatchEvent` both produced no popup. Posting through `IdeEventQueue` runs the event through the IDE's full pipeline, exactly as a real keystroke would.
+  4. **Find the popup.** Searches the focused window's `JList` first (after navigating into a submenu, the submenu owns focus), then any visible AWT window. Skips the typewriter dialog (`MyDialog` window class) and the auto-completion popup (`LookupList` list class) explicitly.
+  5. **Navigate into "Import type…" submenu** when present. Rider's full intentions popup has "Import type…" as a parent item with a submenu marker (`▶`). The submenu (e.g. `System.Drawing.Color`, `UnityEngine.Color`, `…`) is what the user actually wants. We scan list items via reflection (`getText`, `getActionText`, `getValue`, `getName`, falling back to `toString()`), find the index whose text starts with "Import type", animate Down arrows to reach it, then post a `Right` keystroke to expand. After a 250ms render wait, we re-find the (now-focused) submenu list.
+  6. **Reading window** — `Thread.sleep(visibleDelayMs)` while the popup is on screen so the viewer reads the options.
+  7. **Animate selection** — post `Down` arrow keystrokes one at a time via `IdeEventQueue.postEvent`, with `stepDelayMs` (= the typewriter's base `delay`) between each. The viewer sees the highlight crawl down to the chosen index.
+  8. **Post Enter** to accept. Restore focus to the editor (the popup steals focus when shown).
+
+  **Auto-import suppression.** `TypeWriterDialog` toggles `CodeInsightSettings.ADD_UNAMBIGIOUS_IMPORTS_ON_THE_FLY` (typo preserved by IntelliJ for backwards compat) off for the duration of a typing run. Without that, Rider's daemon would auto-add the using as soon as the symbol resolves uniquely, so `{{import}}` would either find no diagnostic (already resolved) or apply the wrong using (whichever ReSharper picked first). The toggle's `RestoreHandle` is idempotent and fires from the scheduler's `onDone` callback, which runs on both natural completion and cancellation.
+
+- **Explicit** (`namespace != null`) — bypasses the daemon and popup entirely. Inserts a language-appropriate import statement (`using` / `import` / `#include` / `require` / `use`) at the document offset returned by `findImportInsertionOffset(text)` — that walker scans the file's prelude looking for a contiguous run of import-style declarations and lands the new line right after, falling back to offset 0 when there are none.
+
+  Format: `{{import[:delayMs[:Namespace[:optionIndex]]]}}`. The first segment is treated as a delay only when it's purely digits, so `Foo.Bar` (no leading number) is interpreted as a namespace. Empty namespace (e.g. `{{import:5000::3}}`) means auto mode with delay + option index.
+
+### `{{caret:DIR:N}}` — directional caret movement
+
+`CaretMoveByDirectionCommand` does one `caret.moveCaretRelatively(...)` step per command. The parser emits N copies so each press takes its own typewriter tick (and the standard delay/jitter pacing applies between presses, same way `complete` and the bracket-pair sequencer work). The action accepts both `caret` and `carret` so the typo is forgivable.
+
+The dialog itself surfaces the available templates in a **Templates** `JBList` at the top (above the language combo and tabs). Each entry is a `TemplateEntry(kind)` where `kind` is the `TemplateKind` enum (`PAUSE`, `REFORMAT`, `COMPLETE`, `IMPORT_AUTO`, `IMPORT_NS`, `IMPORT_OPTION`, `CARET`). The list's cell renderer rebuilds the syntax string on every paint by reading the live `openingSequence`/`closingSequence` properties. Double-click or Enter calls `insertTemplate(entry)`, which writes the rendered syntax at the active tab's caret inside a `WriteCommandAction` and re-focuses the editor field.
 
   **bindText gotcha:** the kotlin UI DSL's `bindText(::property)` only flushes the field's value to the bound property on `panel.apply()` — i.e., on OK. Reading `openingSequence` mid-edit gives you the *original* value, not what the user just typed. The dialog therefore captures `openingField` / `closingField` references and installs a `DocumentListener` that mirrors each keystroke into both properties **and** repaints `templateList`. Without this, the templates list and the inserted syntax both go stale.
 
@@ -191,19 +216,24 @@ Application-level `PersistentStateComponent` (`@Service(APP)`, stored in `typewr
 ### Module layout
 
 ```
-com.github.asm0dey.typewriterplugin
-├── TypeWriterAction              # Action entry; opens the (non-modal) dialog
-├── TypeWriterDialog              # Modeless dialog: EditorTextField + language picker + delay/jitter/markers + "keep open"
-├── TypeWriterSettings            # @Service(APP) PersistentStateComponent — survives IDE restart
-├── TypewriterExecutorService     # @Service(APP) single-threaded scheduler, Disposable
+games.engineroom.typewriter
+├── TypeWriterAction                  # Action entry; opens the (non-modal) dialog. Hosts the template parser (executeTyping)
+├── TypeWriterDialog                  # Modeless dialog: tabs + language picker + delay/jitter/markers + keep-open + suppress-auto-import
+├── TypeWriterSettings                # @Service(APP) PersistentStateComponent — survives IDE restart
+├── TypewriterExecutorService         # @Service(APP) single-threaded scheduler, Disposable
+├── AutoImports                       # Toggle CodeInsightSettings.ADD_UNAMBIGIOUS_IMPORTS_ON_THE_FLY around a session
+├── Enrichment                        # Per-language keyword presets + enrich/unenrich text transforms
+├── EnrichDialog                      # Modal popup configuring the enrichment keywords + frequency mode
 ├── TypeWriterBundle / TypeWriterConstants
 └── commands/
-    ├── Command                       # marker interface : Runnable
-    ├── WriteTextCommand              # insertString(text) + caret.moveToOffset + scrollToCaret
-    ├── MoveCaretCommand              # caret.moveToOffset(+delta) + scrollToCaret
-    ├── TriggerAutocompleteCommand    # AutoPopupController.scheduleAutoPopup + sleep
-    ├── PauseCommand                  # Thread.sleep
-    └── ReformatCommand               # invokes the "ReformatCode" action
+    ├── Command                            # marker interface : Runnable
+    ├── WriteTextCommand                   # TypedAction (single char) or insertString (multi-char) + caret.moveToOffset + scrollToCaret
+    ├── MoveCaretCommand                   # caret.moveToOffset(+delta) + scrollToCaret
+    ├── CaretMoveByDirectionCommand        # caret.moveCaretRelatively(dir) — one step per command
+    ├── TriggerAutocompleteCommand         # AutoPopupController.scheduleAutoPopup + sleep + dismiss
+    ├── ImportCommand                      # Auto: drives Rider's Alt+Enter popup with arrow-key animation. Explicit: inserts a language-appropriate import line
+    ├── PauseCommand                       # Thread.sleep
+    └── ReformatCommand                    # invokes the "ReformatCode" action
 ```
 
 ### Things to watch for when modifying
@@ -213,3 +243,8 @@ com.github.asm0dey.typewriterplugin
 - Template parsing is regex-based on the user-supplied opening/closing sequences. Always feed them through `Regex.escape` before composing the pattern (already done).
 - The IDE auto-pair setting (`CodeInsightSettings.AUTOINSERT_PAIR_BRACKET`) must be **on** for the bracket-pair planning math to be right — `emitAutoPair` doesn't type the closer itself, it relies on the IDE adding it. If a user disables auto-pair globally, brackets in their typed-out script will be missing closers. Force-enabling it for the duration of a session (the way the old `TypingSession` did) is an option if this becomes a problem.
 - Use the IntelliJ Platform Gradle Plugin 2.x APIs (`intellijPlatform { ... }` block), not the older `intellij { ... }` DSL. Version catalog lives in `gradle/libs.versions.toml`.
+- The auto-import path's keystroke trickery (Alt+Enter dispatch + popup discovery + Right-to-submenu + Down-arrow animation) went through several dead ends before settling on the current shape. Don't simplify it back to one of those without re-testing in Rider C#:
+  - `ShowIntentionsPass.getActionsToShow(editor, file)` returns an empty list for Rider C# — ReSharper's intentions go through their own protocol surface and don't appear in IntelliJ's `IntentionsInfo`. So our own popup, mirroring that list, is empty in Rider.
+  - `ActionManager.tryToExecute("ShowIntentionActions", …)` and `component.dispatchEvent(KeyEvent)` both fail to show the popup. Only `IdeEventQueue.postEvent(…)` engages `IdeKeyEventDispatcher` and triggers the action.
+  - Without a daemon-ready wait before dispatch, Rider shows the *full* intentions popup (Create type / Refactor / …) instead of the focused import-only one. Polling `DocumentMarkupModel.forDocument(…).allHighlighters` for an error-or-warning highlight at the caret is the signal that the daemon has flagged the symbol; once we see one, the popup will be the right one.
+  - The auto-completion popup (`LookupList` JList) is alive while the typewriter types identifiers and competes with the intentions popup. Hide the active `Lookup` before dispatching, and skip `LookupList` explicitly when scanning for the popup to drive.

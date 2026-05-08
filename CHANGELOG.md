@@ -4,6 +4,19 @@
 
 ## Unreleased
 
+## 0.5.0
+
+### Added
+
+- `{{import:N::K}}` template — drives the IDE's native Alt+Enter intentions popup. Waits for the daemon to flag the unresolved symbol (polls the document's markup model rather than sleeping a fixed amount), dispatches Alt+Enter, navigates into Rider's "Import type…" submenu when present, then animates Down-arrow keystrokes at typewriter pace to reach the K-th option before pressing Enter. The `N` is the read window in milliseconds the popup stays visible before the cursor starts moving.
+- `{{import:N:Namespace}}` — explicit form. Inserts a language-appropriate import line (`using` for C#, `import` for Java/Kotlin/Python/JS/TS, `#include` for C/C++, `require` for Ruby, `use` for PHP) at the top of the file, after any existing imports.
+- `{{caret:up|down|left|right:N}}` template — moves the caret N steps in the chosen direction, one step per typewriter tick. The misspelling `{{carret:…:N}}` is accepted as an alias.
+- "Suppress IDE auto-import during typing" toggle in the dialog (default on). Flips `CodeInsightSettings.ADD_UNAMBIGIOUS_IMPORTS_ON_THE_FLY` off for the duration of the run and restores it afterwards, so `{{import}}` controls when usings are added instead of the IDE sneaking them in mid-typing.
+
+### Changed
+
+- The auto-import flow temporarily hides any active auto-completion popup before dispatching Alt+Enter so the intentions popup isn't competing with the completion lookup visually.
+
 ## 0.4.0
 
 ### Added

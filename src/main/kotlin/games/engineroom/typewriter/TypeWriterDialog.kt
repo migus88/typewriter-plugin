@@ -69,6 +69,7 @@ class TypeWriterDialog(private val project: Project) :
     var closingSequence: String = settings.closingSequence
     var keepOpen: Boolean = settings.keepOpen
     var completionDelay: Int = settings.completionDelay
+    var suppressAutoImport: Boolean = settings.suppressAutoImport
 
     private val tabsState: MutableList<TabState> = mutableListOf()
     private var activeTabIndex: Int = 0
@@ -416,6 +417,11 @@ class TypeWriterDialog(private val project: Project) :
                 checkBox(message("dialog.keep.open"))
                     .bindSelected(::keepOpen)
             }
+            row {
+                checkBox(message("dialog.suppress.auto.import"))
+                    .bindSelected(::suppressAutoImport)
+                    .comment(message("dialog.suppress.auto.import.comment"))
+            }
         }
         return dialogPanel
     }
@@ -554,6 +560,10 @@ class TypeWriterDialog(private val project: Project) :
         PAUSE("{O}pause:1000{C}", "template.pause.description"),
         REFORMAT("{O}reformat{C}", "template.reformat.description"),
         COMPLETE("{O}complete:3:Word{C}", "template.complete.description"),
+        IMPORT_AUTO("{O}import:300{C}", "template.import.auto.description"),
+        IMPORT_NS("{O}import:300:Namespace{C}", "template.import.ns.description"),
+        IMPORT_OPTION("{O}import:300::2{C}", "template.import.option.description"),
+        CARET("{O}caret:up:3{C}", "template.caret.description"),
     }
 
     private class TemplateEntry(val kind: TemplateKind) {
@@ -581,6 +591,12 @@ class TypeWriterDialog(private val project: Project) :
         val activeText = tabsState[activeTabIndex].editorField.text
         val keepOpenSnapshot = keepOpen
 
+        // Suppress IDE auto-import for the duration of the run so the user's `{{import}}`
+        // template stays in control. The handle's `restore()` is idempotent, and the scheduler's
+        // onDone fires on both natural completion and cancellation, so the user's settings can't
+        // be left in the modified state under normal circumstances.
+        val importSuppressor = if (suppressAutoImport) AutoImports.suppress() else null
+
         if (keepOpenSnapshot) {
             // Stay open during the run so the Stop button is reachable. Freeze inputs;
             // onTypingDone unfreezes (or closes, if the user toggled keepOpen off mid-run).
@@ -597,7 +613,10 @@ class TypeWriterDialog(private val project: Project) :
                 jitter = jitter,
                 completionDelay = completionDelay.toLong(),
                 scheduler = scheduler,
-                onDone = ::onTypingDone,
+                onDone = {
+                    importSuppressor?.restore()
+                    onTypingDone()
+                },
             )
         } else {
             // Close the dialog *before* typing starts. Focus returns to the IDE editor and the
@@ -612,7 +631,9 @@ class TypeWriterDialog(private val project: Project) :
                 jitter = jitter,
                 completionDelay = completionDelay.toLong(),
                 scheduler = scheduler,
-                onDone = {},
+                onDone = {
+                    importSuppressor?.restore()
+                },
             )
         }
     }
@@ -667,6 +688,7 @@ class TypeWriterDialog(private val project: Project) :
         settings.closingSequence = closingSequence
         settings.keepOpen = keepOpen
         settings.completionDelay = completionDelay
+        settings.suppressAutoImport = suppressAutoImport
         settings.activeTabIndex = activeTabIndex
         settings.tabs = tabsState.map { it.toData() }.toMutableList()
     }

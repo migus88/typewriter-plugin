@@ -28,8 +28,13 @@ Tabs and settings persist across IDE restarts.
 | `{{pause:1000}}` | Pause typing for 1000 ms |
 | `{{reformat}}` | Reformat the code at the caret |
 | `{{complete:3:Greeting}}` | Imitates IntelliSense — types `Gre`, surfaces the popup, waits, then drops `eting` in one chunk |
+| `{{import:5000::3}}` | Drives the IDE's Alt+Enter intentions popup. Waits for the daemon to flag the unresolved symbol, opens the popup, navigates into Rider's "Import type…" submenu, animates the highlight down to the 3rd option (each step paced like a typed character), and presses Enter. The `5000` is the read window in ms before the cursor starts moving |
+| `{{import:5000:UnityEngine.Color}}` | Explicit form — inserts a language-appropriate import line (`using` / `import` / `#include` / `require` / `use`) at the top of the file, after any existing imports |
+| `{{caret:up:3}}` | Move the caret 3 steps in the chosen direction (`up`, `down`, `left`, `right`) at typewriter pace |
 
 The dialog has a **Templates** list at the top — double-click any entry to insert it at the active tab's caret. The opening/closing markers (default `{{` / `}}`) are configurable.
+
+There's also an **Enrich…** button that wraps matching language keywords in your script with `{{complete}}` templates automatically — useful when you want a screencast to feel like real typing without authoring every completion beat by hand. Built-in keyword presets ship for Kotlin, Java, C#, Python, JS, TS, C++, C, PHP, Ruby, and Go; you can add custom keywords per language and tune per-keyword min/max prefix lengths. Three frequency modes (**All / Heavy / Light**) control how often a match gets wrapped.
 
 <!-- Plugin description end -->
 
