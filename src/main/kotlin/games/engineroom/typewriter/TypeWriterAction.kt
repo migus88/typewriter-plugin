@@ -75,6 +75,12 @@ fun executeTyping(
     var concatPos = 0
     var lastEnd = 0
 
+    // True only on iterations immediately following an [EnterCommand], when the IDE has just
+    // auto-indented a fresh line. Source indent characters that follow are then redundant and get
+    // dropped. Anything that moves the caret or writes text clears it; pause leaves it alone since
+    // it has no editor side-effects.
+    var indentOwnedByIde = false
+
     fun emitAutoPair(cls: Classification.AutoPair) {
         // Type the opener through TypedAction (single-char route in WriteTextCommand). The IDE
         // auto-pairs the closer for us — we deliberately **do not** type the closer ourselves.
@@ -102,6 +108,7 @@ fun executeTyping(
             val pos = concatPos + i
             when (val cls = classification[pos]) {
                 is Classification.AutoPair -> {
+                    indentOwnedByIde = false
                     emitAutoPair(cls)
                     i++
                 }
@@ -111,6 +118,7 @@ fun executeTyping(
                 }
 
                 Classification.SkipChar -> {
+                    indentOwnedByIde = false
                     var count = 0
                     while (i + count < segment.length &&
                         classification[concatPos + i + count] == Classification.SkipChar
@@ -126,16 +134,16 @@ fun executeTyping(
                     when {
                         c == '\n' -> {
                             // Press Enter via the IDE's action handler so it auto-indents the
-                            // new line. The walker doesn't track how many chars the IDE inserts;
-                            // it just lets the caret land wherever the IDE put it.
+                            // new line. Flag the next indent run as IDE-owned so we don't double up.
                             commands += EnterCommand(pause(), editor)
+                            indentOwnedByIde = true
                             i++
                         }
-                        isLineStart(concat, pos) && isIndentChar(c) -> {
-                            // Source indent at line start is dropped — the IDE's auto-indent
-                            // (from the EnterCommand above, or from however the caret arrived
-                            // at column 0) owns the leading whitespace. This means scripts can
-                            // be loosely indented and still produce well-formatted output.
+                        indentOwnedByIde && isIndentChar(c) -> {
+                            // The IDE just auto-indented after the EnterCommand above; drop the
+                            // source's redundant indent characters. We stay in this branch until
+                            // a non-indent char (or any caret/text emission elsewhere) clears the
+                            // flag, so multi-char indent runs get fully consumed.
                             var len = 0
                             while (i + len < segment.length &&
                                 classification[concatPos + i + len] == null &&
@@ -146,6 +154,7 @@ fun executeTyping(
                             i += len
                         }
                         else -> {
+                            indentOwnedByIde = false
                             commands += WriteTextCommand(c.toString(), pause(), editor)
                             i++
                         }
@@ -169,8 +178,14 @@ fun executeTyping(
         val rest = if (firstColon < 0) "" else raw.substring(firstColon + 1)
         var consumedAfterTemplate = 0
         when (name) {
+            // Pause has no editor side-effects, so it must not clobber `indentOwnedByIde` —
+            // a `\n` followed by `{{pause}}` followed by source indent should still skip the
+            // indent (the IDE just auto-indented before the pause).
             "pause" -> commands += PauseCommand(rest.trim().toLongOrNull() ?: 0L)
-            "reformat" -> commands += ReformatCommand(editor)
+            "reformat" -> {
+                indentOwnedByIde = false
+                commands += ReformatCommand(editor)
+            }
             // "carret" is the misspelling-tolerant alias — the canonical name is "caret".
             "caret", "carret" -> {
                 // Format: caret:DIRECTION:N — emit N single-step commands so each press takes a
@@ -182,6 +197,7 @@ fun executeTyping(
                     val count = countStr.toIntOrNull() ?: 0
                     val direction = parseCaretDirection(dirStr)
                     if (direction != null && count > 0) {
+                        indentOwnedByIde = false
                         repeat(count) {
                             commands += CaretMoveByDirectionCommand(direction, pause(), editor)
                         }
@@ -220,6 +236,7 @@ fun executeTyping(
                         Triple(asInt.toLong(), nsRaw.trim().ifBlank { null }, opt)
                     }
                 }
+                indentOwnedByIde = false
                 commands += ImportCommand(
                     editor = editor,
                     namespace = ns,
@@ -232,6 +249,7 @@ fun executeTyping(
                 )
             }
             "complete" -> {
+                indentOwnedByIde = false
                 // Format: complete:N:Word — type N chars of Word, trigger auto-popup, wait
                 // completionDelay ms, then drop the rest of Word in a single tick.
                 val secondColon = rest.indexOf(':')
@@ -292,8 +310,6 @@ private fun parseCaretDirection(s: String): CaretDirection? = when (s) {
 }
 
 private fun isIndentChar(c: Char): Boolean = c == ' ' || c == '\t'
-
-private fun isLineStart(concat: String, pos: Int): Boolean = pos == 0 || concat[pos - 1] == '\n'
 
 /**
  * Split a whitespace string into typing chunks. Each `\n` carries its following indent run, so
