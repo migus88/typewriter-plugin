@@ -3,6 +3,7 @@ package games.engineroom.typewriter
 import games.engineroom.typewriter.commands.CaretDirection
 import games.engineroom.typewriter.commands.CaretMoveByDirectionCommand
 import games.engineroom.typewriter.commands.Command
+import games.engineroom.typewriter.commands.EnterCommand
 import games.engineroom.typewriter.commands.ImportCommand
 import games.engineroom.typewriter.commands.MoveCaretCommand
 import games.engineroom.typewriter.commands.PauseCommand
@@ -122,19 +123,32 @@ fun executeTyping(
 
                 null -> {
                     val c = segment[i]
-                    if (isLineStart(concat, pos) && isIndentChar(c)) {
-                        var len = 0
-                        while (i + len < segment.length &&
-                            classification[concatPos + i + len] == null &&
-                            isIndentChar(segment[i + len])
-                        ) {
-                            len++
+                    when {
+                        c == '\n' -> {
+                            // Press Enter via the IDE's action handler so it auto-indents the
+                            // new line. The walker doesn't track how many chars the IDE inserts;
+                            // it just lets the caret land wherever the IDE put it.
+                            commands += EnterCommand(pause(), editor)
+                            i++
                         }
-                        commands += WriteTextCommand(segment.substring(i, i + len), pause(), editor)
-                        i += len
-                    } else {
-                        commands += WriteTextCommand(c.toString(), pause(), editor)
-                        i++
+                        isLineStart(concat, pos) && isIndentChar(c) -> {
+                            // Source indent at line start is dropped — the IDE's auto-indent
+                            // (from the EnterCommand above, or from however the caret arrived
+                            // at column 0) owns the leading whitespace. This means scripts can
+                            // be loosely indented and still produce well-formatted output.
+                            var len = 0
+                            while (i + len < segment.length &&
+                                classification[concatPos + i + len] == null &&
+                                isIndentChar(segment[i + len])
+                            ) {
+                                len++
+                            }
+                            i += len
+                        }
+                        else -> {
+                            commands += WriteTextCommand(c.toString(), pause(), editor)
+                            i++
+                        }
                     }
                 }
             }
@@ -309,30 +323,94 @@ private fun chunkWhitespace(ws: String): List<String> {
 }
 
 /**
- * Stack-based bracket matching producing a per-index classification map. Bracket pairs that are
- * correctly nested produce an [Classification.AutoPair] at the opener index, [Classification.ConsumeOnly]
- * over the leading whitespace, and [Classification.SkipChar] over the trailing whitespace and the
- * closer. Everything else is unclassified (`null`) and treated as a regular character.
+ * Single-pass classifier that produces a per-index classification map for two kinds of pairs:
+ *
+ * - **Bracket pairs** (`{}`, `()`, `[]`) outside string literals — opener becomes
+ *   [Classification.AutoPair] (with leading/trailing whitespace captured), inner whitespace
+ *   becomes [Classification.ConsumeOnly] / [Classification.SkipChar] for the auto-pair sequencer,
+ *   closer becomes [Classification.SkipChar].
+ * - **String pairs** (`"…"`, `'…'`) — opener becomes [Classification.AutoPair] (empty
+ *   leading/trailing), closer becomes [Classification.SkipChar]. The IDE auto-pairs the closing
+ *   quote when the opener is typed; the source's matching quote is then skipped over.
+ *
+ * Strings are detected with a tiny state machine that honors `\X` escape sequences and bails on
+ * a literal newline (most C-style strings don't span lines). Brackets inside a string are left
+ * unclassified — they're typed as plain characters, letting the IDE decide whether to auto-pair
+ * them in that lexical context (it usually doesn't, except for `{}` inside C# `$"…"`
+ * interpolations, where the IDE's own auto-pair handles closing correctly).
+ *
+ * Everything else is unclassified (`null`) and treated as a regular character.
  */
 private fun classify(content: String): Map<Int, Classification> {
     val pairs = mutableMapOf<Int, Int>()
+    val quoteOpens = mutableSetOf<Int>()
     val stack = ArrayDeque<Pair<Char, Int>>()
-    for (i in content.indices) {
+    var i = 0
+    var stringQuote: Char? = null
+    var stringStart = -1
+
+    while (i < content.length) {
         val c = content[i]
-        when {
-            c in OPEN_TO_CLOSE -> stack.addLast(c to i)
-            c in CLOSE_TO_OPEN -> {
-                val top = stack.lastOrNull()
-                if (top != null && top.first == CLOSE_TO_OPEN[c]) {
-                    pairs[top.second] = i
-                    stack.removeLast()
+        if (stringQuote != null) {
+            when {
+                c == '\\' && i + 1 < content.length -> {
+                    // `\X` escape — consume both chars without classifying.
+                    i += 2
                 }
+                c == stringQuote -> {
+                    pairs[stringStart] = i
+                    quoteOpens += stringStart
+                    stringQuote = null
+                    stringStart = -1
+                    i++
+                }
+                c == '\n' -> {
+                    // Unterminated string fragment; drop the open without recording a pair, then
+                    // let the outer loop see the `\n` on the next iteration.
+                    stringQuote = null
+                    stringStart = -1
+                }
+                else -> i++
+            }
+        } else {
+            when {
+                c == '"' || c == '\'' -> {
+                    stringQuote = c
+                    stringStart = i
+                    i++
+                }
+                c in OPEN_TO_CLOSE -> {
+                    stack.addLast(c to i)
+                    i++
+                }
+                c in CLOSE_TO_OPEN -> {
+                    val top = stack.lastOrNull()
+                    if (top != null && top.first == CLOSE_TO_OPEN[c]) {
+                        pairs[top.second] = i
+                        stack.removeLast()
+                    }
+                    i++
+                }
+                else -> i++
             }
         }
     }
 
     val result = mutableMapOf<Int, Classification>()
     for ((openIdx, closeIdx) in pairs) {
+        if (openIdx in quoteOpens) {
+            // Quote pair: opener triggers IDE auto-pair, closer is skipped over. The body chars
+            // type plainly — no leading/trailing whitespace dance.
+            result[openIdx] = Classification.AutoPair(
+                open = content[openIdx],
+                leading = "",
+                trailing = "",
+                close = content[closeIdx],
+            )
+            result[closeIdx] = Classification.SkipChar
+            continue
+        }
+
         var firstNonWs = openIdx + 1
         while (firstNonWs < closeIdx && content[firstNonWs].isWhitespace()) firstNonWs++
 
@@ -355,8 +433,8 @@ private fun classify(content: String): Map<Int, Classification> {
             trailing = content.substring(trailingStart, closeIdx),
             close = content[closeIdx],
         )
-        for (i in (openIdx + 1) until leadingEnd) result[i] = Classification.ConsumeOnly
-        for (i in trailingStart until closeIdx) result[i] = Classification.SkipChar
+        for (j in (openIdx + 1) until leadingEnd) result[j] = Classification.ConsumeOnly
+        for (j in trailingStart until closeIdx) result[j] = Classification.SkipChar
         result[closeIdx] = Classification.SkipChar
     }
     return result

@@ -69,7 +69,6 @@ class TypeWriterDialog(private val project: Project) :
     var closingSequence: String = settings.closingSequence
     var keepOpen: Boolean = settings.keepOpen
     var completionDelay: Int = settings.completionDelay
-    var suppressAutoImport: Boolean = settings.suppressAutoImport
 
     private val tabsState: MutableList<TabState> = mutableListOf()
     private var activeTabIndex: Int = 0
@@ -417,11 +416,6 @@ class TypeWriterDialog(private val project: Project) :
                 checkBox(message("dialog.keep.open"))
                     .bindSelected(::keepOpen)
             }
-            row {
-                checkBox(message("dialog.suppress.auto.import"))
-                    .bindSelected(::suppressAutoImport)
-                    .comment(message("dialog.suppress.auto.import.comment"))
-            }
         }
         return dialogPanel
     }
@@ -591,11 +585,11 @@ class TypeWriterDialog(private val project: Project) :
         val activeText = tabsState[activeTabIndex].editorField.text
         val keepOpenSnapshot = keepOpen
 
-        // Suppress IDE auto-import for the duration of the run so the user's `{{import}}`
+        // Always suppress IDE auto-import for the duration of the run so the user's `{{import}}`
         // template stays in control. The handle's `restore()` is idempotent, and the scheduler's
         // onDone fires on both natural completion and cancellation, so the user's settings can't
         // be left in the modified state under normal circumstances.
-        val importSuppressor = if (suppressAutoImport) AutoImports.suppress() else null
+        val importSuppressor = AutoImports.suppress()
 
         if (keepOpenSnapshot) {
             // Stay open during the run so the Stop button is reachable. Freeze inputs;
@@ -614,7 +608,7 @@ class TypeWriterDialog(private val project: Project) :
                 completionDelay = completionDelay.toLong(),
                 scheduler = scheduler,
                 onDone = {
-                    importSuppressor?.restore()
+                    importSuppressor.restore()
                     onTypingDone()
                 },
             )
@@ -632,7 +626,7 @@ class TypeWriterDialog(private val project: Project) :
                 completionDelay = completionDelay.toLong(),
                 scheduler = scheduler,
                 onDone = {
-                    importSuppressor?.restore()
+                    importSuppressor.restore()
                 },
             )
         }
@@ -688,7 +682,6 @@ class TypeWriterDialog(private val project: Project) :
         settings.closingSequence = closingSequence
         settings.keepOpen = keepOpen
         settings.completionDelay = completionDelay
-        settings.suppressAutoImport = suppressAutoImport
         settings.activeTabIndex = activeTabIndex
         settings.tabs = tabsState.map { it.toData() }.toMutableList()
     }

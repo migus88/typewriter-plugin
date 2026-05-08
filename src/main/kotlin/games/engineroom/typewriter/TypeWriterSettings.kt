@@ -42,14 +42,6 @@ class TypeWriterSettings : PersistentStateComponent<TypeWriterSettings> {
     var completionDelay: Int = TypeWriterConstants.defaultCompletionDelay
 
     /**
-     * Toggle the IDE's auto-import-on-the-fly setting off for the duration of a typing run.
-     * Default `true` — typewriter sessions are screencasts where the user wants explicit control
-     * over when usings are added (via `{{import}}`), and Rider/ReSharper otherwise sneaks them
-     * in as soon as an unresolved name resolves uniquely.
-     */
-    var suppressAutoImport: Boolean = true
-
-    /**
      * Per-language keyword presets used by the enrichment dialog. Lazily populated — a language
      * only appears here once the user opens the enrich dialog while that language is active.
      */
