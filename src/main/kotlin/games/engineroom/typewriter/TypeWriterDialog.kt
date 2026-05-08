@@ -554,6 +554,7 @@ class TypeWriterDialog(private val project: Project) :
         PAUSE("{O}pause:1000{C}", "template.pause.description"),
         REFORMAT("{O}reformat{C}", "template.reformat.description"),
         COMPLETE("{O}complete:3:Word{C}", "template.complete.description"),
+        COMPLETE_DELAY("{O}complete:3:500:Word{C}", "template.complete.delay.description"),
         IMPORT_AUTO("{O}import:300{C}", "template.import.auto.description"),
         IMPORT_NS("{O}import:300:Namespace{C}", "template.import.ns.description"),
         IMPORT_OPTION("{O}import:300::2{C}", "template.import.option.description"),

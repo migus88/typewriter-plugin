@@ -256,12 +256,30 @@ fun executeTyping(
             }
             "complete" -> {
                 indentOwnedByIde = false
-                // Format: complete:N:Word — type N chars of Word, trigger auto-popup, wait
-                // completionDelay ms, then drop the rest of Word in a single tick.
+                // Formats:
+                //   complete:N:Word          — global completionDelay
+                //   complete:N:DELAY:Word    — DELAY (ms, all-digits) overrides for this template
+                //
+                // Type N chars of Word at the normal typing pace, trigger the IDE auto-popup,
+                // sleep DELAY ms while the popup is visible, then drop the rest of Word in a
+                // single insert.
                 val secondColon = rest.indexOf(':')
                 if (secondColon > 0) {
                     val n = rest.substring(0, secondColon).trim().toIntOrNull() ?: 0
-                    val word = rest.substring(secondColon + 1)
+                    val afterN = rest.substring(secondColon + 1)
+                    // Optional inline-delay segment: leading digits followed by `:`. Anchored
+                    // to the start so a Word that simply contains digits and colons (e.g.
+                    // `foo:bar`) isn't misinterpreted; only `<digits>:` at position 0 counts.
+                    val delayMatch = Regex("^(\\d+):").find(afterN)
+                    val templateDelay: Long
+                    val word: String
+                    if (delayMatch != null) {
+                        templateDelay = delayMatch.groupValues[1].toLong()
+                        word = afterN.substring(delayMatch.range.last + 1)
+                    } else {
+                        templateDelay = completionDelay
+                        word = afterN
+                    }
                     if (word.isNotEmpty()) {
                         val effectiveN = n.coerceIn(0, word.length)
                         val prefix = word.substring(0, effectiveN)
@@ -292,8 +310,14 @@ fun executeTyping(
                             tail += sb.toString()
                             consumedAfterTemplate = sb.length
                         }
-                        if (prefix.isNotEmpty()) commands += WriteTextCommand(prefix, pause(), editor)
-                        commands += TriggerAutocompleteCommand(completionDelay, editor)
+                        // One WriteTextCommand per prefix char so the typing paces like normal
+                        // user input (each char goes through TypedAction with its own jittered
+                        // pause). A single multi-char insert would dump the whole prefix in a
+                        // tick.
+                        for (ch in prefix) {
+                            commands += WriteTextCommand(ch.toString(), pause(), editor)
+                        }
+                        commands += TriggerAutocompleteCommand(templateDelay, editor)
                         if (tail.isNotEmpty()) commands += WriteTextCommand(tail, pause(), editor)
                     }
                 }
