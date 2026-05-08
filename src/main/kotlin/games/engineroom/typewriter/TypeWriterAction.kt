@@ -75,11 +75,17 @@ fun executeTyping(
     var concatPos = 0
     var lastEnd = 0
 
-    // True only on iterations immediately following an [EnterCommand], when the IDE has just
-    // auto-indented a fresh line. Source indent characters that follow are then redundant and get
-    // dropped. Anything that moves the caret or writes text clears it; pause leaves it alone since
+    // True when the cursor is on a line whose indentation is already established — so any
+    // subsequent source indent characters are redundant and get dropped. Two situations:
+    //
+    //   1. Right after an [EnterCommand], the IDE has just auto-indented the new line.
+    //   2. At the very start of a run, the user has positioned the caret on a blank indented line
+    //      (the typical screencast setup: double-click into an existing class body). Typing the
+    //      script's own leading indent on top would double the indentation.
+    //
+    // Anything that moves the caret or writes text clears the flag; pause leaves it alone since
     // it has no editor side-effects.
-    var indentOwnedByIde = false
+    var indentOwnedByIde = true
 
     fun emitAutoPair(cls: Classification.AutoPair) {
         // Type the opener through TypedAction (single-char route in WriteTextCommand). The IDE
