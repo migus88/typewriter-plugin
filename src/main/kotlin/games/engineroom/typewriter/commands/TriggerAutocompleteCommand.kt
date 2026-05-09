@@ -5,6 +5,7 @@ import com.intellij.codeInsight.lookup.LookupManager
 import com.intellij.codeInsight.lookup.impl.LookupImpl
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.editor.Editor
+import games.engineroom.typewriter.KeyboardSoundService
 
 /**
  * Schedule the IDE's auto-popup, sleep for [pauseAfter] ms so the popup has time to render,
@@ -28,6 +29,7 @@ class TriggerAutocompleteCommand(
             AutoPopupController.getInstance(project).scheduleAutoPopup(editor)
         }
         Thread.sleep(pauseAfter)
+        KeyboardSoundService.get().playEnter()
         ApplicationManager.getApplication().invokeAndWait {
             (LookupManager.getActiveLookup(editor) as? LookupImpl)?.hideLookup(true)
         }

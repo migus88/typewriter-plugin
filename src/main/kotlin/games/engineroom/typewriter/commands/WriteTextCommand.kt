@@ -6,6 +6,7 @@ import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.ScrollType
 import com.intellij.openapi.editor.actionSystem.TypedAction
+import games.engineroom.typewriter.KeyboardSoundService
 
 /**
  * Insert [text] at the caret in one tick.
@@ -37,12 +38,16 @@ class WriteTextCommand(
 
     override fun run() {
         if (text.length == 1 && text[0] != '\n') {
+            val ch = text[0]
+            if (ch == ' ') KeyboardSoundService.get().playSpace()
+            else KeyboardSoundService.get().playKey()
             ApplicationManager.getApplication().invokeAndWait {
                 val dataContext = DataManager.getInstance().getDataContext(editor.contentComponent)
-                TypedAction.getInstance().actionPerformed(editor, text[0], dataContext)
+                TypedAction.getInstance().actionPerformed(editor, ch, dataContext)
                 editor.scrollingModel.scrollToCaret(ScrollType.RELATIVE)
             }
         } else {
+            if (text.contains('\n')) KeyboardSoundService.get().playEnter()
             WriteCommandAction.runWriteCommandAction(editor.project) {
                 val offset = caret.offset
                 document.insertString(offset, text)

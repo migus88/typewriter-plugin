@@ -14,6 +14,7 @@ import com.intellij.openapi.editor.impl.DocumentMarkupModel
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.IdeFocusManager
 import com.intellij.psi.PsiDocumentManager
+import games.engineroom.typewriter.KeyboardSoundService
 import java.awt.Component
 import java.awt.Container
 import java.awt.KeyboardFocusManager
@@ -142,6 +143,7 @@ class ImportCommand(
         val workingList: JList<*> = if (importTypeIdx >= 0) {
             LOG.info("Found 'Import type' at index $importTypeIdx; navigating into submenu")
             navigateInPopup(initialList.selectedIndex.coerceAtLeast(0), importTypeIdx)
+            KeyboardSoundService.get().playKey()
             postKeyToFocused(KeyEvent.VK_RIGHT)
             Thread.sleep(POPUP_RENDER_MS)
             val submenu = findIntentionsList()
@@ -173,6 +175,7 @@ class ImportCommand(
         navigateInPopup(currentIdx, targetIdx)
 
         // Confirm.
+        KeyboardSoundService.get().playEnter()
         postKeyToFocused(KeyEvent.VK_ENTER)
 
         restoreEditorFocus(project)
@@ -241,6 +244,7 @@ class ImportCommand(
         val keyCode = if (diff > 0) KeyEvent.VK_DOWN else KeyEvent.VK_UP
         val steps = kotlin.math.abs(diff)
         repeat(steps) {
+            KeyboardSoundService.get().playKey()
             postKeyToFocused(keyCode)
             Thread.sleep(stepDelayMs.toLong().coerceAtLeast(1L))
         }

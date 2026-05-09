@@ -6,6 +6,7 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.ScrollType
 import com.intellij.openapi.editor.actionSystem.EditorActionManager
+import games.engineroom.typewriter.KeyboardSoundService
 
 /**
  * Press Enter via the IDE's editor-enter action handler. Triggers the same code path as a real
@@ -22,6 +23,7 @@ class EnterCommand(
     private val editor: Editor,
 ) : Command {
     override fun run() {
+        KeyboardSoundService.get().playEnter()
         ApplicationManager.getApplication().invokeAndWait {
             val handler = EditorActionManager.getInstance()
                 .getActionHandler(IdeActions.ACTION_EDITOR_ENTER)

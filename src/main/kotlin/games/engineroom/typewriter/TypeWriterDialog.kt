@@ -117,6 +117,10 @@ class TypeWriterDialog(private val project: Project) :
     private lateinit var closingField: JTextField
 
     init {
+        // Preload keyboard sounds + warm up the audio mixer on a background thread so the first
+        // keystroke doesn't pay file IO + first-time mixer init latency.
+        KeyboardSoundService.get().prewarm()
+
         // Build initial tabs from persisted state, falling back to a single empty default.
         val saved = settings.tabs
         if (saved.isEmpty()) {
