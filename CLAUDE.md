@@ -2,6 +2,20 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Keeping README.md in sync
+
+The user-facing description of this plugin lives in [`README.md`](README.md). The block between `<!-- Plugin description -->` and `<!-- Plugin description end -->` is also published as the JetBrains Marketplace listing — `buildPlugin` fails if those markers go missing.
+
+**Every new feature, behaviour change, macro, setting, or shortcut must be reflected in `README.md` as part of the same change.** Concretely:
+
+- New macros → add a row to the **Inline macros** table with at least one example.
+- New settings → add an entry under **Settings** describing the knob and its range/units.
+- New run-mode behaviour, run-time IDE side effects, or environmental requirements → update **Run modes** or **What it does to your IDE during a run**.
+- Renamed / removed features → remove the stale README mention (don't leave dangling references).
+- Shortcut / action changes → update the line in the description block that documents the keymap.
+
+If a change is purely internal (refactor, rewording in code comments, test-only) and the README's user-facing copy is unchanged by it, you can skip the README edit — but say so explicitly when reporting the change. Default to "yes, update the README" when in doubt.
+
 ## Project
 
 JetBrains IDE plugin (IntelliJ Platform) that auto-types text into the editor at a configurable speed — used for screencasts/demos. Supports inline template commands (`{{pause:1000}}`, `{{reformat}}`, `{{complete:N:Word}}`, `{{import:N::K}}`, `{{import:N:Namespace}}`, `{{caret:DIR:N}}`).
