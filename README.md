@@ -15,7 +15,7 @@ Hit <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd> (or <kbd>Ctrl</kbd>+<kbd>Shift<
 ## Authoring
 
 - **Real code editor**, backed by a `LightVirtualFile` so the script gets the same PSI-driven services your normal editor does.
-- **Tabs.** Keep multiple scripts ready at once. Click the **+** to add, double-click a tab to rename, click the **×** to close. Each tab has its own text and language. Tabs and their contents persist across IDE restarts.
+- **Tabs.** Keep multiple scripts ready at once. The tab strip is a single row that scrolls horizontally when there are more tabs than fit — a scroll bar appears under the strip rather than collapsing into a dropdown. Click the **+** in the top toolbar to add a tab, double-click a tab to rename, click the **×** on a tab to close it (always visible — no hover-to-reveal). Each tab has its own text and language. Tabs and their contents persist across IDE restarts.
 - **Per-tab language picker.** Switching languages re-spins the underlying `LightVirtualFile` so the highlighter follows along without losing your text.
 - **Non-modal dialog.** Park it on a second screen while typing plays in your code editor. The active editor is captured at "Start" time, not when the action fires, so you can re-focus the IDE first.
 - **Macro syntax highlighting** layers a configurable colour over `{{ … }}` macro spans inside your scripts, with a separate colour for the colon-separated arguments after the macro name. Both colours are live-editable in **Settings**.
@@ -49,6 +49,10 @@ Macros are inline directives wrapped in configurable markers (default `{{` and `
 | `{{backspace-hold:5}}` | Imitates press-and-hold: 5 characters disappear one at a time at typing pace, but only one click sound is played (at the start) — modelling a held key, not 5 tapped presses. |
 | `{{goto:private static}}` | Walks the caret (arrow-key steps, click sound + typing-pace pause per step) from offset 0 forward until it lands right after the first occurrence of `private static`. Not a teleport — the viewer sees the caret crawl. Horizontal travel uses Alt+Arrow (word-skip) jumps when the next word boundary doesn't overshoot the target, falling back to single-char arrows for the final approach. |
 | `{{goto:private static:private static class}}` | Same as above, but disambiguates: searches the document for `private static class` first and then for `private static` *after* that anchor — so a generic target string lands on the occurrence you actually meant. Splitting is on the first colon, so neither part may contain `:`. |
+| `{{snip:ctor}}` | Type the live-template abbreviation `ctor` at typing pace, hold for 200 ms so the viewer sees the prefix sitting at the caret, then press Tab to expand the IDE snippet. Works with any registered live template (Rider/ReSharper templates, IntelliJ live templates, language-specific snippets). The Tab keystroke is dispatched through the full IDE event pipeline so whatever expansion handler the language ships with — IntelliJ's, ReSharper's, etc. — picks it up exactly as it would for a real keypress. |
+| `{{snip:ctor:500}}` | Same as above, but with an explicit 500 ms hold before Tab — overrides the 200 ms default. |
+| `{{key:tab}}` | Press Tab once at the caret (with the keyboard click sound). Goes through the IDE's editor-tab action handler — typically inserts a tab/spaces or advances indentation, the same as a real Tab key with no higher-priority keymap binding active. **Does not** trigger snippet expansion (use `{{snip:...}}` for that — it routes through the keymap dispatcher so live-template handlers can win). |
+| `{{key:enter}}` | Press Enter once at the caret (with sound). Goes through the IDE's smart-enter handler, so language-aware behaviors fire (auto-indent, brace splitting, etc.). |
 
 The marker tokens (default `{{` / `}}`) are configurable in **Settings** and update live in the macro list and the macro highlighter.
 

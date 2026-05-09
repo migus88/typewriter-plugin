@@ -2,12 +2,17 @@ package games.engineroom.typewriter
 
 import games.engineroom.typewriter.TypeWriterBundle.message
 import com.intellij.icons.AllIcons
+import com.intellij.openapi.actionSystem.AnAction
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.CommonDataKeys
+import com.intellij.openapi.actionSystem.CustomShortcutSet
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.EditorFactory
+import com.intellij.openapi.util.TextRange
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileTypes.FileType
@@ -27,32 +32,29 @@ import com.intellij.ui.SimpleListCellRenderer
 import java.awt.Color
 import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBScrollPane
-import com.intellij.ui.components.JBTabbedPane
 import com.intellij.ui.dsl.builder.*
 import com.intellij.util.ui.JBUI
 import java.awt.BorderLayout
+import java.awt.CardLayout
 import java.awt.Component
 import java.awt.Container
 import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Font
 import java.awt.Insets
-import java.awt.LayoutManager
 import java.awt.event.ActionEvent
-import java.awt.event.FocusAdapter
-import java.awt.event.FocusEvent
 import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import javax.swing.Action
+import javax.swing.BoxLayout
 import javax.swing.JButton
 import javax.swing.JCheckBox
 import javax.swing.JComponent
 import javax.swing.JLabel
-import javax.swing.JLayeredPane
 import javax.swing.JPanel
-import javax.swing.JTextField
+import javax.swing.KeyStroke
 import javax.swing.ListCellRenderer
 import javax.swing.ListSelectionModel
 import javax.swing.SwingUtilities
@@ -74,7 +76,32 @@ class TypeWriterDialog(private val project: Project) :
     private var targetEditor: Editor? = null
     private var suppressLanguageListener: Boolean = false
 
-    private val tabbedPane = JBTabbedPane()
+    // Custom tab strip: a single-row JPanel of TabButtons inside a horizontal scroll pane, with a
+    // CardLayout below for the active tab's editor. Built ourselves rather than using JBTabs
+    // because (a) JBTabs's close-X auto-hides on hover with no per-tab override, and (b) JBTabs
+    // overflow goes to a chevron-popup, never a horizontal scroll bar.
+    private val tabStrip: JPanel = JPanel().apply {
+        layout = BoxLayout(this, BoxLayout.X_AXIS)
+        isOpaque = false
+    }
+    private val tabScroll: JBScrollPane = JBScrollPane(
+        tabStrip,
+        javax.swing.ScrollPaneConstants.VERTICAL_SCROLLBAR_NEVER,
+        // ALWAYS instead of AS_NEEDED so the scrollbar reserves a dedicated row at the bottom of
+        // the strip — without that, JBScrollPane on macOS renders the horizontal bar in overlay
+        // mode, painting it on top of the tab labels.
+        javax.swing.ScrollPaneConstants.HORIZONTAL_SCROLLBAR_ALWAYS,
+    ).apply {
+        border = JBUI.Borders.empty()
+        horizontalScrollBar.unitIncrement = 30
+        horizontalScrollBar.blockIncrement = 120
+        // Pin the strip+scrollbar block to a known total height. NORTH placement asks for the
+        // preferred height; without an explicit value the layout slack made the bar visually
+        // collide with the labels.
+        preferredSize = Dimension(0, TAB_ROW_HEIGHT + SCROLLBAR_HEIGHT)
+        minimumSize = Dimension(0, TAB_ROW_HEIGHT + SCROLLBAR_HEIGHT)
+    }
+    private val tabContent: JPanel = JPanel(CardLayout()).apply { isOpaque = false }
     private val languageCombo: ComboBox<FileType> = ComboBox(textFileTypes())
     private val plusButton: JButton = JButton(AllIcons.General.Add).apply {
         toolTipText = message("dialog.add.tab.tooltip")
@@ -160,17 +187,13 @@ class TypeWriterDialog(private val project: Project) :
         }
         activeTabIndex = settings.activeTabIndex.coerceIn(0, tabsState.size - 1)
 
-        for ((i, state) in tabsState.withIndex()) {
-            tabbedPane.addTab(state.name, state.editorField)
-            tabbedPane.setTabComponentAt(i, makeTabHeader(state))
+        for (state in tabsState) {
+            val button = makeTabButton(state)
+            state.button = button
+            tabStrip.add(button)
+            tabContent.add(state.editorField, state.cardId)
         }
-        tabbedPane.selectedIndex = activeTabIndex
-        tabbedPane.addChangeListener {
-            val newIndex = tabbedPane.selectedIndex
-            if (newIndex < 0 || newIndex >= tabsState.size) return@addChangeListener
-            activeTabIndex = newIndex
-            updateLanguageCombo()
-        }
+        selectTabByIndex(activeTabIndex)
 
         languageCombo.renderer = SimpleListCellRenderer.create("") { it?.name.orEmpty() }
         languageCombo.selectedItem = tabsState[activeTabIndex].fileType
@@ -191,127 +214,68 @@ class TypeWriterDialog(private val project: Project) :
     private fun addNewTab() {
         val state = createNewTabState()
         tabsState += state
-        val newIndex = tabsState.size - 1
-        tabbedPane.addTab(state.name, state.editorField)
-        tabbedPane.setTabComponentAt(newIndex, makeTabHeader(state))
-        tabbedPane.selectedIndex = newIndex
+        val button = makeTabButton(state)
+        state.button = button
+        tabStrip.add(button)
+        tabContent.add(state.editorField, state.cardId)
+        tabStrip.revalidate()
+        tabStrip.repaint()
+        selectTabByIndex(tabsState.size - 1)
+        // Defer the scroll so the strip has finished its layout pass under the new child.
+        SwingUtilities.invokeLater { scrollTabIntoView(state) }
     }
 
-    private fun closeTab(state: TabState) {
+    private fun closeTabState(state: TabState) {
         if (tabsState.size <= 1) return
         val index = tabsState.indexOf(state)
         if (index < 0) return
+        val button = state.button
         tabsState.removeAt(index)
-        tabbedPane.removeTabAt(index)
+        if (button != null) tabStrip.remove(button)
+        tabContent.remove(state.editorField)
+        tabStrip.revalidate()
+        tabStrip.repaint()
         if (activeTabIndex >= tabsState.size) activeTabIndex = tabsState.size - 1
-        tabbedPane.selectedIndex = activeTabIndex
+        selectTabByIndex(activeTabIndex)
+    }
+
+    private fun selectTabByIndex(index: Int) {
+        if (index < 0 || index >= tabsState.size) return
+        activeTabIndex = index
+        for ((i, s) in tabsState.withIndex()) {
+            s.button?.setActive(i == index)
+        }
+        (tabContent.layout as CardLayout).show(tabContent, tabsState[index].cardId)
         updateLanguageCombo()
+        SwingUtilities.invokeLater { scrollTabIntoView(tabsState[index]) }
     }
 
-    private fun makeTabHeader(state: TabState): JComponent {
-        val panel = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0))
-        panel.isOpaque = false
-
-        // JTabbedPane only sees clicks that land directly on itself — clicks on a custom tab
-        // header's children go to the children. Without this listener, single-clicking the tab
-        // *name* doesn't switch tabs because the JLabel intercepts the click.
-        val selectListener = object : MouseAdapter() {
-            override fun mouseClicked(e: MouseEvent) {
-                if (e.clickCount == 1 && SwingUtilities.isLeftMouseButton(e)) {
-                    val idx = tabsState.indexOf(state)
-                    if (idx >= 0) tabbedPane.selectedIndex = idx
-                }
-            }
-        }
-        // The tab strip's rollover state is driven by JTabbedPaneUI's own MouseMotionListener
-        // attached to the tabbedPane. With a custom tab component, hover events over the title
-        // hit the JLabel and never reach the tabbedPane, so the rollover never updates. Convert
-        // and re-dispatch every motion/enter/exit event to the tabbedPane so the UI's rollover
-        // tracker sees them.
-        val hoverForwarder = object : MouseAdapter() {
-            override fun mouseEntered(e: MouseEvent) = forward(e)
-            override fun mouseExited(e: MouseEvent) = forward(e)
-            override fun mouseMoved(e: MouseEvent) = forward(e)
-            override fun mouseDragged(e: MouseEvent) = forward(e)
-            private fun forward(e: MouseEvent) {
-                val converted = SwingUtilities.convertMouseEvent(e.component, e, tabbedPane)
-                tabbedPane.dispatchEvent(converted)
-            }
-        }
-        panel.addMouseListener(selectListener)
-        panel.addMouseListener(hoverForwarder)
-        panel.addMouseMotionListener(hoverForwarder)
-
-        val label = JLabel(state.name).apply {
-            toolTipText = message("dialog.rename.tab.tooltip")
-            addMouseListener(selectListener)
-            addMouseListener(hoverForwarder)
-            addMouseMotionListener(hoverForwarder)
-            addMouseListener(object : MouseAdapter() {
-                override fun mouseClicked(e: MouseEvent) {
-                    if (e.clickCount == 2 && SwingUtilities.isLeftMouseButton(e)) {
-                        e.consume()
-                        beginInlineRename(panel, this@apply, state)
-                    }
-                }
-            })
-        }
-        val close = JButton(AllIcons.Actions.Close).apply {
-            rolloverIcon = AllIcons.Actions.CloseHovered
-            isFocusable = false
-            isContentAreaFilled = false
-            isBorderPainted = false
-            margin = Insets(0, 2, 0, 2)
-            preferredSize = Dimension(16, 16)
-            toolTipText = message("dialog.close.tab")
-            addActionListener { closeTab(state) }
-        }
-        panel.add(label)
-        panel.add(close)
-        return panel
+    private fun scrollTabIntoView(state: TabState) {
+        val button = state.button ?: return
+        val bounds = button.bounds
+        if (bounds.width > 0) tabStrip.scrollRectToVisible(bounds)
     }
 
-    private fun beginInlineRename(header: JPanel, label: JLabel, state: TabState) {
-        val close = header.components.find { it is JButton } ?: return
-        val field = JTextField(state.name).apply {
-            columns = state.name.length.coerceAtLeast(8)
-        }
+    private fun makeTabButton(state: TabState): TabButton =
+        TabButton(
+            state = state,
+            onSelect = { selectTabByIndex(tabsState.indexOf(state)) },
+            onClose = { closeTabState(state) },
+            onRename = { renameTab(state) },
+        )
 
-        var finished = false
-        fun finish(commit: Boolean) {
-            if (finished) return
-            finished = true
-            if (commit) {
-                val newName = field.text.trim().ifBlank { state.name }
-                state.name = newName
-                label.text = newName
-                val idx = tabsState.indexOf(state)
-                if (idx >= 0) tabbedPane.setTitleAt(idx, newName)
-            }
-            header.removeAll()
-            header.add(label)
-            header.add(close)
-            header.revalidate()
-            header.repaint()
-        }
-
-        field.addActionListener { finish(true) }
-        field.addFocusListener(object : FocusAdapter() {
-            override fun focusLost(e: FocusEvent) = finish(true)
-        })
-        field.addKeyListener(object : KeyAdapter() {
-            override fun keyPressed(e: KeyEvent) {
-                if (e.keyCode == KeyEvent.VK_ESCAPE) finish(false)
-            }
-        })
-
-        header.removeAll()
-        header.add(field)
-        header.add(close)
-        header.revalidate()
-        header.repaint()
-        field.requestFocusInWindow()
-        field.selectAll()
+    private fun renameTab(state: TabState) {
+        val newName = Messages.showInputDialog(
+            project,
+            message("dialog.rename.tab.prompt"),
+            message("dialog.rename.tab.title"),
+            null,
+            state.name,
+            null,
+        )?.trim().orEmpty()
+        if (newName.isEmpty()) return
+        state.name = newName
+        state.button?.setTitle(newName)
     }
 
     private fun createNewTabState(): TabState {
@@ -354,6 +318,7 @@ class TypeWriterDialog(private val project: Project) :
                 editor.settings.isCaretRowShown = true
                 editor.setVerticalScrollbarVisible(true)
                 editor.setHorizontalScrollbarVisible(true)
+                installPlainEnterHandler(editor)
                 macroHighlighters += MacroHighlighter(
                     editor,
                     disposable,
@@ -366,6 +331,35 @@ class TypeWriterDialog(private val project: Project) :
         }
     }
 
+    /**
+     * Replace the language's smart-Enter with a plain newline that preserves the current line's
+     * leading whitespace. Without this, languages like C# auto-indent every line break by 4
+     * spaces, even when the user just wants to lay text out manually.
+     */
+    private fun installPlainEnterHandler(editor: Editor) {
+        val plainEnter = object : AnAction() {
+            override fun actionPerformed(e: AnActionEvent) {
+                val ed = e.getData(CommonDataKeys.EDITOR) ?: editor
+                val caret = ed.caretModel.primaryCaret
+                val doc = ed.document
+                val offset = caret.offset
+                val lineNum = doc.getLineNumber(offset)
+                val lineStart = doc.getLineStartOffset(lineNum)
+                val before = doc.getText(TextRange(lineStart, offset))
+                val indent = before.takeWhile { it == ' ' || it == '\t' }
+                WriteCommandAction.runWriteCommandAction(project) {
+                    doc.insertString(offset, "\n$indent")
+                    caret.moveToOffset(offset + 1 + indent.length)
+                }
+            }
+        }
+        plainEnter.registerCustomShortcutSet(
+            CustomShortcutSet(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0)),
+            editor.contentComponent,
+            disposable,
+        )
+    }
+
     private fun createDocument(fileType: FileType, text: String): Document {
         val ext = fileType.defaultExtension.ifBlank { "txt" }
         val virtualFile = LightVirtualFile("typewriter_input.$ext", fileType, text)
@@ -376,13 +370,19 @@ class TypeWriterDialog(private val project: Project) :
     // ── Layout ──────────────────────────────────────────────────────────────────────────────
 
     override fun createCenterPanel(): JComponent {
-        // Force the settings icon button to the same height as the language combo so the two
-        // controls align on the top row.
+        // Match the icon button heights to the language combo so the top row aligns.
         val comboH = languageCombo.preferredSize.height
-        settingsButton.preferredSize = Dimension(comboH, comboH)
+        val sq = Dimension(comboH, comboH)
+        settingsButton.preferredSize = sq
+        plusButton.preferredSize = sq
+        val rightTools = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply {
+            isOpaque = false
+            add(plusButton)
+            add(settingsButton)
+        }
         val toolbar = JPanel(BorderLayout(4, 0)).apply {
             add(languageCombo, BorderLayout.CENTER)
-            add(settingsButton, BorderLayout.EAST)
+            add(rightTools, BorderLayout.EAST)
         }
 
         val macroScroll = JBScrollPane(
@@ -393,13 +393,9 @@ class TypeWriterDialog(private val project: Project) :
             border = JBUI.Borders.customLine(com.intellij.ui.JBColor.border(), 1)
             viewport.background = macroList.background
         }
-        // Match the macros-header buttons' height + insets to the JBTabbedPane tab strip on the
-        // right side, so the two header rows line up across the splitter.
-        val tabH = run {
-            // JBTabbedPane has at least one tab by construction, so getBoundsAt(0) yields a
-            // representative tab height once laid out. Use a sensible fallback before then.
-            tabbedPane.getBoundsAt(0)?.height?.takeIf { it > 0 } ?: 30
-        }
+        // Match the macros-header buttons' height to the tab strip's natural height so the two
+        // header rows line up across the splitter.
+        val tabH = 30
         listOf(enrichButton, clearMacrosButton).forEach {
             it.preferredSize = Dimension(it.preferredSize.width, tabH)
             it.margin = Insets(0, 12, 0, 12)
@@ -414,29 +410,16 @@ class TypeWriterDialog(private val project: Project) :
             add(macroScroll, BorderLayout.CENTER)
         }
 
-        // Layered pane: tabbedPane fills the right column; the "+" rides PALETTE_LAYER pinned to
-        // the top-right so it sits on the same line as the tabs.
-        val tabsLayer = JLayeredPane()
-        tabsLayer.layout = object : LayoutManager {
-            override fun layoutContainer(parent: Container) {
-                tabbedPane.setBounds(0, 0, parent.width, parent.height)
-                val gap = 4
-                val pPref = plusButton.preferredSize
-                val pW = pPref.width.coerceAtLeast(28)
-                val pH = pPref.height.coerceAtMost(28).coerceAtLeast(22)
-                plusButton.setBounds(parent.width - pW - gap, gap, pW, pH)
-            }
-            override fun preferredLayoutSize(parent: Container): Dimension = tabbedPane.preferredSize
-            override fun minimumLayoutSize(parent: Container): Dimension = tabbedPane.minimumSize
-            override fun addLayoutComponent(name: String?, comp: Component?) {}
-            override fun removeLayoutComponent(comp: Component?) {}
+        // Tab strip lives in the NORTH; horizontal scroll bar appears under the strip when tabs
+        // overflow. The active tab's editor fills CENTER via CardLayout swap.
+        val tabsPanel = JPanel(BorderLayout()).apply {
+            add(tabScroll, BorderLayout.NORTH)
+            add(tabContent, BorderLayout.CENTER)
         }
-        tabsLayer.add(tabbedPane, JLayeredPane.DEFAULT_LAYER, 0)
-        tabsLayer.add(plusButton, JLayeredPane.PALETTE_LAYER, 0)
 
         val contentSplit = OnePixelSplitter(false, 0.22f).apply {
             firstComponent = macroColumn
-            secondComponent = tabsLayer
+            secondComponent = tabsPanel
             setHonorComponentsMinimumSize(true)
         }
 
@@ -639,6 +622,10 @@ class TypeWriterDialog(private val project: Project) :
             "macro.goto.anchor.description",
             placeholder = "Target",
         ),
+        SNIP("{O}snip:ctor{C}", "macro.snip.description", placeholder = "ctor"),
+        SNIP_DELAY("{O}snip:ctor:500{C}", "macro.snip.delay.description", placeholder = "ctor"),
+        KEY_TAB("{O}key:tab{C}", "macro.key.tab.description"),
+        KEY_ENTER("{O}key:enter{C}", "macro.key.enter.description"),
     }
 
     private class MacroEntry(val kind: MacroKind) {
@@ -799,6 +786,12 @@ class TypeWriterDialog(private val project: Project) :
         var fileType: FileType,
         val editorField: EditorTextField,
     ) {
+        /** Stable identifier for this state's CardLayout entry — survives renames. */
+        val cardId: String = "tab-${cardIdSeq.incrementAndGet()}"
+
+        /** Set right after the TabButton is built; lets state-side ops drive the UI. */
+        var button: TabButton? = null
+
         fun swapFileType(newFileType: FileType) {
             val current = editorField.text
             val newDoc = createDocument(newFileType, current)
@@ -817,5 +810,93 @@ class TypeWriterDialog(private val project: Project) :
         val window = peer.window ?: return
         window.toFront()
         window.requestFocus()
+    }
+
+    /**
+     * One row of the custom tab strip. Renders `[ label  × ]`, switches the active tab on left
+     * click, opens the rename dialog on double-click, and triggers `onClose` when the X is hit.
+     * The X is always visible — that's the whole reason we're not using JBTabs.
+     */
+    private inner class TabButton(
+        val state: TabState,
+        private val onSelect: () -> Unit,
+        private val onClose: () -> Unit,
+        private val onRename: () -> Unit,
+    ) : JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)) {
+
+        private val label = JLabel(state.name).apply {
+            toolTipText = message("dialog.rename.tab.tooltip")
+            border = JBUI.Borders.empty()
+        }
+        private val close = JButton(AllIcons.Actions.Close).apply {
+            rolloverIcon = AllIcons.Actions.CloseHovered
+            isFocusable = false
+            isContentAreaFilled = false
+            isBorderPainted = false
+            margin = Insets(0, 0, 0, 0)
+            preferredSize = Dimension(16, 16)
+            toolTipText = message("dialog.close.tab")
+            addActionListener { onClose() }
+        }
+
+        init {
+            isOpaque = true
+            // Vertical padding sized so each tab clearly out-reads the horizontal scrollbar that
+            // sits directly underneath in the strip's scroll-pane layout.
+            border = JBUI.Borders.empty(7, 12, 7, 6)
+            background = INACTIVE_BG
+            add(label)
+            add(close)
+            // Don't grow vertically beyond the natural row height — BoxLayout would otherwise
+            // stretch us to fill the strip's height, which exposes the background fill all the way
+            // down to the splitter.
+            alignmentY = TOP_ALIGNMENT
+            val mouse = object : MouseAdapter() {
+                override fun mouseClicked(e: MouseEvent) {
+                    if (!SwingUtilities.isLeftMouseButton(e)) return
+                    if (e.clickCount == 2) onRename() else onSelect()
+                }
+            }
+            addMouseListener(mouse)
+            label.addMouseListener(mouse)
+        }
+
+        override fun getMaximumSize(): Dimension {
+            // Lock vertical size to the preferred so BoxLayout doesn't stretch us.
+            val pref = preferredSize
+            return Dimension(pref.width, pref.height)
+        }
+
+        fun setActive(active: Boolean) {
+            background = if (active) ACTIVE_BG else INACTIVE_BG
+            label.foreground = if (active) ACTIVE_FG else null
+            repaint()
+        }
+
+        fun setTitle(title: String) {
+            label.text = title
+            revalidate()
+            repaint()
+        }
+    }
+
+    companion object {
+        private val cardIdSeq = java.util.concurrent.atomic.AtomicInteger()
+        /** Pixel height of a single tab button — keeps the strip taller than the scrollbar. */
+        private const val TAB_ROW_HEIGHT = 32
+        /** Height reserved for the horizontal scroll bar under the strip. */
+        private const val SCROLLBAR_HEIGHT = 14
+        private val ACTIVE_BG: Color = com.intellij.ui.JBColor.namedColor(
+            "EditorTabs.underlinedTabBackground",
+            com.intellij.util.ui.UIUtil.getListSelectionBackground(true),
+        )
+        private val INACTIVE_BG: Color = com.intellij.ui.JBColor.namedColor(
+            "EditorTabs.background",
+            com.intellij.util.ui.UIUtil.getPanelBackground(),
+        )
+        private val ACTIVE_FG: Color = com.intellij.ui.JBColor.namedColor(
+            "EditorTabs.underlinedTabForeground",
+            com.intellij.util.ui.UIUtil.getListSelectionForeground(true),
+        )
     }
 }

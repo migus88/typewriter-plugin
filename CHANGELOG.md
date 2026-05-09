@@ -4,6 +4,18 @@
 
 ## Unreleased
 
+## 0.8.0
+
+### Added
+
+- `{{snip:NAME}}` and `{{snip:NAME:DELAY}}` macros — type a live-template abbreviation char-by-char, hold for `DELAY` ms (200 ms default) so the viewer sees the prefix sit at the caret, then press Tab to expand the IDE snippet. Tab is dispatched through the keymap so whichever expansion handler the language ships with — IntelliJ's, ReSharper's, etc. — picks it up exactly as for a real keypress.
+- `{{key:tab}}` and `{{key:enter}}` macros — simulate single Tab / Enter keypresses (with click sound). Tab routes through the editor-tab action handler (focus-independent, inserts indent); Enter routes through the smart-enter handler (auto-indent, brace splitting). For snippet expansion that needs the keymap dispatcher, use `{{snip:...}}`.
+
+### Changed
+
+- Replaced the `JBTabbedPane`-based tab UI with a custom horizontal-scrolling tab strip. Single row, dedicated horizontal scroll bar at the bottom of the strip when tabs overflow (no chevron-popup), always-visible close × on every tab. The **+** button moved to the top toolbar next to the settings gear.
+- Pressing Enter inside the dialog's editor field no longer fires the language smart-enter — it inserts a plain newline that preserves the current line's leading whitespace. Avoids language plugins (e.g. C#) auto-adding 4 spaces of indent on every line break in the script editor.
+
 ## 0.7.0
 
 ### Added

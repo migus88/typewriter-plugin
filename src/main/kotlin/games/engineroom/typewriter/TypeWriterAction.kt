@@ -10,7 +10,9 @@ import games.engineroom.typewriter.commands.GotoCommand
 import games.engineroom.typewriter.commands.ImportCommand
 import games.engineroom.typewriter.commands.MoveCaretCommand
 import games.engineroom.typewriter.commands.PauseCommand
+import games.engineroom.typewriter.commands.PressTabCommand
 import games.engineroom.typewriter.commands.ReformatCommand
+import games.engineroom.typewriter.commands.TabCommand
 import games.engineroom.typewriter.commands.TriggerAutocompleteCommand
 import games.engineroom.typewriter.commands.WriteTextCommand
 import com.intellij.openapi.actionSystem.AnActionEvent
@@ -49,6 +51,9 @@ class TypeWriterAction : DumbAwareAction() {
 
 private val OPEN_TO_CLOSE = mapOf('{' to '}', '(' to ')', '[' to ']')
 private val CLOSE_TO_OPEN = OPEN_TO_CLOSE.entries.associate { (k, v) -> v to k }
+
+/** Default pause between typing a snippet abbreviation and pressing Tab to expand it. */
+private const val SNIP_DEFAULT_DELAY_MS: Long = 200L
 
 private sealed class Classification {
     data class AutoPair(
@@ -331,6 +336,44 @@ fun executeTyping(
                         editor = editor,
                         pauseAfter = pause(),
                     )
+                }
+            }
+            // Type a snippet/live-template abbreviation char-by-char, hold for [delay] ms so the
+            // viewer sees the prefix sitting at the caret, then press Tab to expand. NAME is the
+            // abbreviation registered in the IDE's live templates (e.g. `ctor` in Rider C#).
+            // Formats:
+            //   {{snip:NAME}}        — uses SNIP_DEFAULT_DELAY_MS before Tab
+            //   {{snip:NAME:DELAY}}  — explicit DELAY in milliseconds
+            "snip" -> {
+                indentOwnedByIde = false
+                val firstColon = rest.indexOf(':')
+                val abbrev: String
+                val delayBeforeTab: Long
+                if (firstColon < 0) {
+                    abbrev = rest.trim()
+                    delayBeforeTab = SNIP_DEFAULT_DELAY_MS
+                } else {
+                    abbrev = rest.substring(0, firstColon).trim()
+                    delayBeforeTab = rest.substring(firstColon + 1).trim().toLongOrNull()
+                        ?.coerceAtLeast(0L) ?: SNIP_DEFAULT_DELAY_MS
+                }
+                if (abbrev.isNotEmpty()) {
+                    for (ch in abbrev) {
+                        commands += WriteTextCommand(ch.toString(), pause(), editor)
+                    }
+                    commands += PressTabCommand(delayBeforeTab, pause(), editor)
+                }
+            }
+            // Simulate a single named key press at the caret. Currently supports `tab` and
+            // `enter`. Each press plays a click sound and uses the standard typing-pace pause.
+            // Unknown keys silently no-op (consistent with the rest of the macro set). Tab here
+            // goes through the editor-tab action handler (focus-independent) — for snippet
+            // expansion that needs the keymap dispatcher, use `{{snip:...}}` instead.
+            "key" -> {
+                indentOwnedByIde = false
+                when (rest.trim().lowercase()) {
+                    "tab" -> commands += TabCommand(pause(), editor)
+                    "enter" -> commands += EnterCommand(pause(), editor)
                 }
             }
             "complete" -> {
