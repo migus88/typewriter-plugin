@@ -14,13 +14,33 @@ import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.project.DumbAwareAction
+import com.intellij.openapi.project.Project
+import com.intellij.openapi.util.Key
 import kotlin.random.Random
 
 class TypeWriterAction : DumbAwareAction() {
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.getData(CommonDataKeys.PROJECT) ?: return
-        TypeWriterDialog(project).show()
+        val existing = project.getUserData(DIALOG_KEY)
+        if (existing != null && !existing.isDisposed) {
+            existing.bringToFront()
+            return
+        }
+        val dialog = TypeWriterDialog(project)
+        project.putUserData(DIALOG_KEY, dialog)
+        dialog.show()
+    }
+
+    companion object {
+        private val DIALOG_KEY: Key<TypeWriterDialog> = Key.create("typewriter.dialog")
+
+        /** Called by the dialog on dispose so a fresh action can open a new instance. */
+        fun clearOpenDialog(project: Project, dialog: TypeWriterDialog) {
+            if (project.getUserData(DIALOG_KEY) === dialog) {
+                project.putUserData(DIALOG_KEY, null)
+            }
+        }
     }
 }
 

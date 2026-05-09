@@ -22,13 +22,14 @@ import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.wm.IdeFocusManager
 import com.intellij.testFramework.LightVirtualFile
 import com.intellij.ui.EditorTextField
+import com.intellij.ui.OnePixelSplitter
 import com.intellij.ui.SimpleListCellRenderer
+import java.awt.Color
 import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTabbedPane
 import com.intellij.ui.dsl.builder.*
 import com.intellij.util.ui.JBUI
-import com.intellij.util.ui.UIUtil
 import java.awt.BorderLayout
 import java.awt.Component
 import java.awt.Container
@@ -36,6 +37,7 @@ import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Font
 import java.awt.Insets
+import java.awt.LayoutManager
 import java.awt.event.ActionEvent
 import java.awt.event.FocusAdapter
 import java.awt.event.FocusEvent
@@ -45,15 +47,15 @@ import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import javax.swing.Action
 import javax.swing.JButton
+import javax.swing.JCheckBox
 import javax.swing.JComponent
 import javax.swing.JLabel
+import javax.swing.JLayeredPane
 import javax.swing.JPanel
 import javax.swing.JTextField
 import javax.swing.ListCellRenderer
 import javax.swing.ListSelectionModel
 import javax.swing.SwingUtilities
-import javax.swing.event.DocumentEvent
-import javax.swing.event.DocumentListener
 
 private val ENRICH_LOG = logger<TypeWriterDialog>()
 
@@ -63,12 +65,9 @@ class TypeWriterDialog(private val project: Project) :
     private val settings = service<TypeWriterSettings>()
     private val scheduler = service<TypewriterExecutorService>()
 
-    var delay: Int = settings.delay
-    var jitter: Int = settings.jitter
-    var openingSequence: String = settings.openingSequence
-    var closingSequence: String = settings.closingSequence
-    var keepOpen: Boolean = settings.keepOpen
-    var completionDelay: Int = settings.completionDelay
+    private var keepOpen: Boolean = settings.keepOpen
+    private var openingSequence: String = settings.openingSequence
+    private var closingSequence: String = settings.closingSequence
 
     private val tabsState: MutableList<TabState> = mutableListOf()
     private var activeTabIndex: Int = 0
@@ -77,51 +76,82 @@ class TypeWriterDialog(private val project: Project) :
 
     private val tabbedPane = JBTabbedPane()
     private val languageCombo: ComboBox<FileType> = ComboBox(textFileTypes())
-    private val addTabButton: JButton = JButton(message("dialog.add.tab"), AllIcons.General.Add)
+    private val plusButton: JButton = JButton(AllIcons.General.Add).apply {
+        toolTipText = message("dialog.add.tab.tooltip")
+        addActionListener { addNewTab() }
+    }
+    private val settingsButton: JButton = JButton(AllIcons.General.Settings).apply {
+        toolTipText = message("dialog.settings.tooltip")
+        addActionListener { openSettingsDialog() }
+    }
     private val enrichButton: JButton = JButton(message("dialog.enrich")).apply {
         toolTipText = message("dialog.enrich.tooltip")
         addActionListener { openEnrichDialog() }
     }
-    private val unenrichButton: JButton = JButton(message("dialog.unenrich")).apply {
-        toolTipText = message("dialog.unenrich.tooltip")
-        addActionListener { unenrichActiveTab() }
+    private val clearMacrosButton: JButton = JButton(message("dialog.clear.macros")).apply {
+        toolTipText = message("dialog.clear.macros.tooltip")
+        addActionListener { clearMacrosInActiveTab() }
+    }
+    private val keepOpenCheckBox: JCheckBox = JCheckBox(message("dialog.keep.open"), keepOpen).apply {
+        addActionListener { keepOpen = isSelected }
     }
 
-    private val templateList: JBList<TemplateEntry> = JBList(TemplateKind.entries.map { TemplateEntry(it) }).apply {
-        selectionMode = ListSelectionModel.SINGLE_SELECTION
-        cellRenderer = makeTemplateRenderer()
-        addMouseListener(object : MouseAdapter() {
-            override fun mouseClicked(e: MouseEvent) {
-                if (e.clickCount == 2 && SwingUtilities.isLeftMouseButton(e)) {
-                    selectedValue?.let { insertTemplate(it) }
-                }
+    private val macroList: JBList<MacroEntry> =
+        object : JBList<MacroEntry>(MacroKind.entries.map { MacroEntry(it) }) {
+            override fun getToolTipText(event: MouseEvent): String? {
+                val idx = locationToIndex(event.point)
+                if (idx < 0) return null
+                val cellBounds = getCellBounds(idx, idx) ?: return null
+                if (!cellBounds.contains(event.point)) return null
+                return message(model.getElementAt(idx).kind.descriptionKey)
             }
-        })
-        addKeyListener(object : KeyAdapter() {
-            override fun keyPressed(e: KeyEvent) {
-                if (e.keyCode == KeyEvent.VK_ENTER) {
-                    selectedValue?.let { insertTemplate(it) }
+        }.apply {
+            selectionMode = ListSelectionModel.SINGLE_SELECTION
+            cellRenderer = makeMacroRenderer()
+            // Without an explicit non-null tooltip text, getToolTipText(MouseEvent) is never
+            // consulted — Swing only invokes the per-event override when the component is already
+            // tooltip-enabled.
+            toolTipText = ""
+            addMouseListener(object : MouseAdapter() {
+                override fun mouseClicked(e: MouseEvent) {
+                    if (e.clickCount == 2 && SwingUtilities.isLeftMouseButton(e)) {
+                        selectedValue?.let { insertMacro(it) }
+                    }
                 }
-            }
-        })
-    }
-
-    private val stopAction: Action = object : DialogWrapperAction(message("dialog.stop")) {
-        override fun doAction(e: ActionEvent) {
-            scheduler.stop()
+            })
+            addKeyListener(object : KeyAdapter() {
+                override fun keyPressed(e: KeyEvent) {
+                    if (e.keyCode == KeyEvent.VK_ENTER) {
+                        selectedValue?.let { insertMacro(it) }
+                    }
+                }
+            })
         }
-    }.also { it.isEnabled = false }
+
+    private val startStopAction: Action = object : DialogWrapperAction(message("dialog.start")) {
+        init {
+            putValue(DEFAULT_ACTION, true)
+        }
+
+        override fun doAction(e: ActionEvent) {
+            if (scheduler.isRunning) {
+                scheduler.stop()
+            } else {
+                startTyping()
+            }
+        }
+    }
 
     private lateinit var dialogPanel: DialogPanel
-    private lateinit var openingField: JTextField
-    private lateinit var closingField: JTextField
+
+    /** All macro highlighters created across the tab editors — refreshed when markers change. */
+    private val macroHighlighters: MutableList<MacroHighlighter> = mutableListOf()
 
     init {
         // Preload keyboard sounds + warm up the audio mixer on a background thread so the first
         // keystroke doesn't pay file IO + first-time mixer init latency.
         KeyboardSoundService.get().prewarm()
 
-        // Build initial tabs from persisted state, falling back to a single empty default.
         val saved = settings.tabs
         if (saved.isEmpty()) {
             tabsState += createNewTabState()
@@ -137,10 +167,9 @@ class TypeWriterDialog(private val project: Project) :
         tabbedPane.selectedIndex = activeTabIndex
         tabbedPane.addChangeListener {
             val newIndex = tabbedPane.selectedIndex
-            if (newIndex >= 0) {
-                activeTabIndex = newIndex
-                updateLanguageCombo()
-            }
+            if (newIndex < 0 || newIndex >= tabsState.size) return@addChangeListener
+            activeTabIndex = newIndex
+            updateLanguageCombo()
         }
 
         languageCombo.renderer = SimpleListCellRenderer.create("") { it?.name.orEmpty() }
@@ -152,32 +181,9 @@ class TypeWriterDialog(private val project: Project) :
             if (active.fileType != selected) active.swapFileType(selected)
         }
 
-        addTabButton.isFocusable = false
-        addTabButton.addActionListener { addNewTab() }
-
         title = message("dialog.title")
         isModal = false
-        setOKButtonText(message("dialog.start"))
-        setCancelButtonText(message("dialog.close"))
         init()
-
-        // The kotlin UI DSL's `bindText` only flushes to the bound property on `apply()` —
-        // typing in the markers fields won't update `openingSequence` / `closingSequence` until
-        // OK. The templates list and the insert action both need *live* values, so we hook a
-        // DocumentListener that mirrors the field text into the property and forces the list
-        // to repaint with each keystroke.
-        val markerListener = object : DocumentListener {
-            override fun insertUpdate(e: DocumentEvent) = sync()
-            override fun removeUpdate(e: DocumentEvent) = sync()
-            override fun changedUpdate(e: DocumentEvent) = sync()
-            private fun sync() {
-                openingSequence = openingField.text
-                closingSequence = closingField.text
-                templateList.repaint()
-            }
-        }
-        openingField.document.addDocumentListener(markerListener)
-        closingField.document.addDocumentListener(markerListener)
     }
 
     // ── Tab management ──────────────────────────────────────────────────────────────────────
@@ -217,11 +223,30 @@ class TypeWriterDialog(private val project: Project) :
                 }
             }
         }
+        // The tab strip's rollover state is driven by JTabbedPaneUI's own MouseMotionListener
+        // attached to the tabbedPane. With a custom tab component, hover events over the title
+        // hit the JLabel and never reach the tabbedPane, so the rollover never updates. Convert
+        // and re-dispatch every motion/enter/exit event to the tabbedPane so the UI's rollover
+        // tracker sees them.
+        val hoverForwarder = object : MouseAdapter() {
+            override fun mouseEntered(e: MouseEvent) = forward(e)
+            override fun mouseExited(e: MouseEvent) = forward(e)
+            override fun mouseMoved(e: MouseEvent) = forward(e)
+            override fun mouseDragged(e: MouseEvent) = forward(e)
+            private fun forward(e: MouseEvent) {
+                val converted = SwingUtilities.convertMouseEvent(e.component, e, tabbedPane)
+                tabbedPane.dispatchEvent(converted)
+            }
+        }
         panel.addMouseListener(selectListener)
+        panel.addMouseListener(hoverForwarder)
+        panel.addMouseMotionListener(hoverForwarder)
 
         val label = JLabel(state.name).apply {
             toolTipText = message("dialog.rename.tab.tooltip")
             addMouseListener(selectListener)
+            addMouseListener(hoverForwarder)
+            addMouseMotionListener(hoverForwarder)
             addMouseListener(object : MouseAdapter() {
                 override fun mouseClicked(e: MouseEvent) {
                     if (e.clickCount == 2 && SwingUtilities.isLeftMouseButton(e)) {
@@ -246,10 +271,6 @@ class TypeWriterDialog(private val project: Project) :
         return panel
     }
 
-    /**
-     * Swap the tab's label out for a [JTextField] and let the user type a new name. Enter (or
-     * focus loss) commits, Escape cancels. The header keeps its close button throughout.
-     */
     private fun beginInlineRename(header: JPanel, label: JLabel, state: TabState) {
         val close = header.components.find { it is JButton } ?: return
         val field = JTextField(state.name).apply {
@@ -331,10 +352,16 @@ class TypeWriterDialog(private val project: Project) :
                 editor.settings.isIndentGuidesShown = true
                 editor.settings.additionalLinesCount = 0
                 editor.settings.isCaretRowShown = true
-                // EditorTextField hides scrollbars by default — long scripts then push the dialog
-                // taller instead of scrolling. Re-enable so the editor scrolls within its bounds.
                 editor.setVerticalScrollbarVisible(true)
                 editor.setHorizontalScrollbarVisible(true)
+                macroHighlighters += MacroHighlighter(
+                    editor,
+                    disposable,
+                    { openingSequence },
+                    { closingSequence },
+                    { Color(settings.macroColor) },
+                    { Color(settings.macroArgColor) },
+                )
             }
         }
     }
@@ -349,88 +376,104 @@ class TypeWriterDialog(private val project: Project) :
     // ── Layout ──────────────────────────────────────────────────────────────────────────────
 
     override fun createCenterPanel(): JComponent {
-        val toolbar = JPanel(BorderLayout()).apply {
-            val left = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
-                add(JLabel(message("dialog.language") + ":"))
-                add(languageCombo)
-                add(enrichButton)
-                add(unenrichButton)
+        // Force the settings icon button to the same height as the language combo so the two
+        // controls align on the top row.
+        val comboH = languageCombo.preferredSize.height
+        settingsButton.preferredSize = Dimension(comboH, comboH)
+        val toolbar = JPanel(BorderLayout(4, 0)).apply {
+            add(languageCombo, BorderLayout.CENTER)
+            add(settingsButton, BorderLayout.EAST)
+        }
+
+        val macroScroll = JBScrollPane(
+            macroList,
+            javax.swing.ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
+            javax.swing.ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED,
+        ).apply {
+            border = JBUI.Borders.customLine(com.intellij.ui.JBColor.border(), 1)
+            viewport.background = macroList.background
+        }
+        // Match the macros-header buttons' height + insets to the JBTabbedPane tab strip on the
+        // right side, so the two header rows line up across the splitter.
+        val tabH = run {
+            // JBTabbedPane has at least one tab by construction, so getBoundsAt(0) yields a
+            // representative tab height once laid out. Use a sensible fallback before then.
+            tabbedPane.getBoundsAt(0)?.height?.takeIf { it > 0 } ?: 30
+        }
+        listOf(enrichButton, clearMacrosButton).forEach {
+            it.preferredSize = Dimension(it.preferredSize.width, tabH)
+            it.margin = Insets(0, 12, 0, 12)
+        }
+        val macroHeader = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
+            add(enrichButton)
+            add(clearMacrosButton)
+        }
+        val macroColumn = JPanel(BorderLayout(0, 0)).apply {
+            preferredSize = Dimension(240, 0)
+            add(macroHeader, BorderLayout.NORTH)
+            add(macroScroll, BorderLayout.CENTER)
+        }
+
+        // Layered pane: tabbedPane fills the right column; the "+" rides PALETTE_LAYER pinned to
+        // the top-right so it sits on the same line as the tabs.
+        val tabsLayer = JLayeredPane()
+        tabsLayer.layout = object : LayoutManager {
+            override fun layoutContainer(parent: Container) {
+                tabbedPane.setBounds(0, 0, parent.width, parent.height)
+                val gap = 4
+                val pPref = plusButton.preferredSize
+                val pW = pPref.width.coerceAtLeast(28)
+                val pH = pPref.height.coerceAtMost(28).coerceAtLeast(22)
+                plusButton.setBounds(parent.width - pW - gap, gap, pW, pH)
             }
-            add(left, BorderLayout.WEST)
-            add(addTabButton, BorderLayout.EAST)
+            override fun preferredLayoutSize(parent: Container): Dimension = tabbedPane.preferredSize
+            override fun minimumLayoutSize(parent: Container): Dimension = tabbedPane.minimumSize
+            override fun addLayoutComponent(name: String?, comp: Component?) {}
+            override fun removeLayoutComponent(comp: Component?) {}
+        }
+        tabsLayer.add(tabbedPane, JLayeredPane.DEFAULT_LAYER, 0)
+        tabsLayer.add(plusButton, JLayeredPane.PALETTE_LAYER, 0)
+
+        val contentSplit = OnePixelSplitter(false, 0.22f).apply {
+            firstComponent = macroColumn
+            secondComponent = tabsLayer
+            setHonorComponentsMinimumSize(true)
         }
 
         dialogPanel = panel {
             row {
-                label(message("dialog.templates.title"))
-            }
-            row {
-                cell(JBScrollPane(templateList).apply {
-                    preferredSize = Dimension(0, 96)
-                })
-                    .align(Align.FILL)
-                    .resizableColumn()
-            }
-            row {
                 cell(toolbar)
                     .align(Align.FILL)
                     .resizableColumn()
-            }.topGap(TopGap.MEDIUM)
+            }
             row {
-                cell(tabbedPane)
+                cell(contentSplit)
                     .align(Align.FILL)
                     .resizableColumn()
             }.resizableRow()
-            row {
-                intTextField(IntRange(1, 2000), 4)
-                    .label(message("dialog.delay"))
-                    .bindIntText(::delay)
-                    .gap(RightGap.SMALL)
-                @Suppress("DialogTitleCapitalization")
-                label(message("dialog.ms"))
-
-                intTextField(IntRange(0, 2000), 4)
-                    .label(message("dialog.jitter"))
-                    .bindIntText(::jitter)
-                    .gap(RightGap.SMALL)
-                @Suppress("DialogTitleCapitalization")
-                label(message("dialog.ms"))
-            }
-            row(message("dialog.template.markers")) {
-                openingField = textField()
-                    .columns(4)
-                    .bindText(::openingSequence)
-                    .component
-                @Suppress("DialogTitleCapitalization")
-                label("…")
-                closingField = textField()
-                    .columns(4)
-                    .bindText(::closingSequence)
-                    .component
-            }
-            row {
-                intTextField(IntRange(0, 10000), 4)
-                    .label(message("dialog.completion.delay"))
-                    .bindIntText(::completionDelay)
-                    .gap(RightGap.SMALL)
-                @Suppress("DialogTitleCapitalization")
-                label(message("dialog.ms"))
-            }
-            row {
-                checkBox(message("dialog.keep.open"))
-                    .bindSelected(::keepOpen)
-            }
         }
         return dialogPanel
     }
 
+    override fun createSouthPanel(): JComponent {
+        val defaultSouth = super.createSouthPanel()
+        // BorderLayout vertically centers WEST and CENTER in the available height — putting both
+        // the checkbox and the default south panel directly into a BorderLayout aligns the
+        // checkbox baseline with the Start button without piling on extra padding. Equal left/
+        // right insets match the default south panel's natural horizontal margin.
+        keepOpenCheckBox.border = JBUI.Borders.emptyLeft(12)
+        return JPanel(BorderLayout()).apply {
+            add(keepOpenCheckBox, BorderLayout.WEST)
+            add(defaultSouth, BorderLayout.CENTER)
+        }
+    }
+
     /**
-     * Renders each template entry on a single row: monospaced syntax on the left, dimmed
-     * description on the right. The syntax string is rebuilt on each paint using the *current*
-     * `openingSequence` / `closingSequence`, so if the user changes the markers the list reflects
-     * it without explicit refreshing.
+     * Macro list renderer — single-column list of monospaced macro syntax. Description text is
+     * surfaced via the list's per-cell tooltip rather than alongside the syntax to keep the panel
+     * narrow.
      */
-    private fun makeTemplateRenderer(): ListCellRenderer<in TemplateEntry> =
+    private fun makeMacroRenderer(): ListCellRenderer<in MacroEntry> =
         ListCellRenderer { list, value, _, selected, _ ->
             val panel = JPanel(BorderLayout()).apply {
                 isOpaque = true
@@ -441,30 +484,23 @@ class TypeWriterDialog(private val project: Project) :
                 font = Font(Font.MONOSPACED, Font.PLAIN, font.size)
                 foreground = if (selected) list.selectionForeground else list.foreground
             }
-            val desc = JLabel(message(value.kind.descriptionKey)).apply {
-                foreground = if (selected) list.selectionForeground else UIUtil.getInactiveTextColor()
-                border = JBUI.Borders.emptyLeft(12)
-            }
             panel.add(syntax, BorderLayout.WEST)
-            panel.add(desc, BorderLayout.CENTER)
             panel
         }
 
-    /**
-     * Insert the template at the active tab's caret using the current marker settings, then
-     * focus the editor field so the user can keep typing.
-     */
-    /**
-     * Open the enrichment configuration popup for the active tab's language. The dialog mutates
-     * the persisted [EnrichmentPreset] in place; on OK we read its current state and apply
-     * [enrichText] to the active tab's content via a [WriteCommandAction] so undo works.
-     */
+    private fun openSettingsDialog() {
+        val dialog = SettingsDialog(project, dialogPanel, settings)
+        if (!dialog.showAndGet()) return
+        // Pull the freshly-applied values back into the dialog's local snapshot so the macros
+        // list / highlighter picks up the new markers and color without restarting.
+        openingSequence = settings.openingSequence
+        closingSequence = settings.closingSequence
+        macroList.repaint()
+        for (h in macroHighlighters) h.refresh()
+    }
+
     private fun openEnrichDialog() {
         try {
-            // Live values: the user may have edited the marker fields without applying.
-            openingSequence = openingField.text
-            closingSequence = closingField.text
-
             val state = tabsState[activeTabIndex]
             val preset = resolveEnrichmentPreset(settings, state.fileType.name)
             val mode = runCatching { EnrichmentMode.valueOf(settings.enrichmentMode) }
@@ -501,11 +537,8 @@ class TypeWriterDialog(private val project: Project) :
         }
     }
 
-    private fun unenrichActiveTab() {
+    private fun clearMacrosInActiveTab() {
         try {
-            openingSequence = openingField.text
-            closingSequence = closingField.text
-
             val state = tabsState[activeTabIndex]
             val current = state.editorField.text
             val transformed = unenrichText(
@@ -516,20 +549,15 @@ class TypeWriterDialog(private val project: Project) :
             if (transformed == current) return
             replaceTabText(state, transformed)
         } catch (t: Throwable) {
-            ENRICH_LOG.error("Unenrich failed", t)
+            ENRICH_LOG.error("Clear macros failed", t)
             Messages.showErrorDialog(
                 project,
-                "Unenrich failed: ${t.javaClass.simpleName}: ${t.message}",
+                "Clear macros failed: ${t.javaClass.simpleName}: ${t.message}",
                 message("dialog.title"),
             )
         }
     }
 
-    /**
-     * Replace the entire tab document via a write action so the change is undoable from the
-     * dialog's editor. After replacement, restore focus + caret position so the user can keep
-     * editing in place.
-     */
     private fun replaceTabText(state: TabState, newText: String) {
         val doc = state.editorField.document
         val ed = state.editorField.editor
@@ -541,42 +569,82 @@ class TypeWriterDialog(private val project: Project) :
         state.editorField.requestFocusInWindow()
     }
 
-    private fun insertTemplate(entry: TemplateEntry) {
+    /**
+     * Insert a macro at the active tab. When the editor has a selection and the macro defines a
+     * placeholder (e.g. `Word`, `Namespace`), the selected text replaces the placeholder inside
+     * the inserted syntax — turning a highlighted token into the macro's argument in one step.
+     */
+    private fun insertMacro(entry: MacroEntry) {
         val state = tabsState[activeTabIndex]
-        val syntax = entry.render(openingSequence, closingSequence)
         val ed = state.editorField.editor
+        val selectionModel = ed?.selectionModel
+        val hasSelection = selectionModel != null && selectionModel.hasSelection()
+        val selectedText = if (hasSelection) selectionModel.selectedText.orEmpty() else ""
+
+        val syntax = entry.render(openingSequence, closingSequence).let { rendered ->
+            val placeholder = entry.kind.placeholder
+            if (hasSelection && placeholder != null && rendered.contains(placeholder)) {
+                rendered.replace(placeholder, selectedText)
+            } else {
+                rendered
+            }
+        }
+
         WriteCommandAction.runWriteCommandAction(project) {
             val doc = state.editorField.document
-            val offset = ed?.caretModel?.primaryCaret?.offset ?: doc.textLength
-            doc.insertString(offset, syntax)
-            ed?.caretModel?.primaryCaret?.moveToOffset(offset + syntax.length)
+            val (start, end) = if (hasSelection) {
+                selectionModel.selectionStart to selectionModel.selectionEnd
+            } else {
+                val caret = ed?.caretModel?.primaryCaret?.offset ?: doc.textLength
+                caret to caret
+            }
+            doc.replaceString(start, end, syntax)
+            ed?.caretModel?.primaryCaret?.moveToOffset(start + syntax.length)
+            if (hasSelection) selectionModel.removeSelection()
         }
         state.editorField.requestFocusInWindow()
     }
 
-    private enum class TemplateKind(val pattern: String, val descriptionKey: String) {
-        PAUSE("{O}pause:1000{C}", "template.pause.description"),
-        REFORMAT("{O}reformat{C}", "template.reformat.description"),
-        COMPLETE("{O}complete:3:Word{C}", "template.complete.description"),
-        COMPLETE_DELAY("{O}complete:3:500:Word{C}", "template.complete.delay.description"),
-        IMPORT_AUTO("{O}import:300{C}", "template.import.auto.description"),
-        IMPORT_NS("{O}import:300:Namespace{C}", "template.import.ns.description"),
-        IMPORT_OPTION("{O}import:300::2{C}", "template.import.option.description"),
-        CARET("{O}caret:up:3{C}", "template.caret.description"),
+    /**
+     * `placeholder` is the substring inside `pattern` that gets replaced by selected editor text
+     * when a macro is inserted while a selection is active. `null` means the macro has no
+     * placeholder and the selection is just overwritten with the rendered syntax.
+     */
+    private enum class MacroKind(
+        val pattern: String,
+        val descriptionKey: String,
+        val placeholder: String? = null,
+    ) {
+        PAUSE("{O}pause:1000{C}", "macro.pause.description"),
+        REFORMAT("{O}reformat{C}", "macro.reformat.description"),
+        COMPLETE("{O}complete:3:Word{C}", "macro.complete.description", placeholder = "Word"),
+        COMPLETE_DELAY(
+            "{O}complete:3:500:Word{C}",
+            "macro.complete.delay.description",
+            placeholder = "Word",
+        ),
+        IMPORT_AUTO("{O}import:300{C}", "macro.import.auto.description"),
+        IMPORT_NS(
+            "{O}import:300:Namespace{C}",
+            "macro.import.ns.description",
+            placeholder = "Namespace",
+        ),
+        IMPORT_OPTION("{O}import:300::2{C}", "macro.import.option.description"),
+        CARET("{O}caret:up:3{C}", "macro.caret.description"),
     }
 
-    private class TemplateEntry(val kind: TemplateKind) {
+    private class MacroEntry(val kind: MacroKind) {
         fun render(open: String, close: String): String =
             kind.pattern.replace("{O}", open).replace("{C}", close)
     }
 
-    override fun createActions(): Array<Action> = arrayOf(okAction, stopAction, cancelAction)
+    override fun createActions(): Array<Action> = arrayOf(startStopAction)
 
     override fun getPreferredFocusedComponent(): JComponent = tabsState[activeTabIndex].editorField
 
-    // ── OK / Stop / Cancel / dispose ────────────────────────────────────────────────────────
+    // ── Start / Stop / dispose ──────────────────────────────────────────────────────────────
 
-    override fun doOKAction() {
+    private fun startTyping() {
         dialogPanel.apply()
         persistSettings()
 
@@ -590,27 +658,19 @@ class TypeWriterDialog(private val project: Project) :
         val activeText = tabsState[activeTabIndex].editorField.text
         val keepOpenSnapshot = keepOpen
 
-        // Always suppress IDE auto-import for the duration of the run so the user's `{{import}}`
-        // template stays in control. The handle's `restore()` is idempotent, and the scheduler's
-        // onDone fires on both natural completion and cancellation, so the user's settings can't
-        // be left in the modified state under normal circumstances.
         val importSuppressor = AutoImports.suppress()
 
         if (keepOpenSnapshot) {
-            // Stay open during the run so the Stop button is reachable. Freeze inputs;
-            // onTypingDone unfreezes (or closes, if the user toggled keepOpen off mid-run).
             setUiEnabled(false)
-            // Push focus to the target editor so its caret blinks and is visible while typing.
-            // requestFocusInWindow doesn't cross window boundaries; IdeFocusManager does.
             IdeFocusManager.getInstance(project).requestFocus(editor.contentComponent, true)
             executeTyping(
                 editor = editor,
                 text = activeText,
                 openingSequence = openingSequence,
                 closingSequence = closingSequence,
-                delay = delay.toLong(),
-                jitter = jitter,
-                completionDelay = completionDelay.toLong(),
+                delay = settings.delay.toLong(),
+                jitter = settings.jitter,
+                completionDelay = settings.completionDelay.toLong(),
                 scheduler = scheduler,
                 onDone = {
                     importSuppressor.restore()
@@ -618,17 +678,15 @@ class TypeWriterDialog(private val project: Project) :
                 },
             )
         } else {
-            // Close the dialog *before* typing starts. Focus returns to the IDE editor and the
-            // typing animation runs without the dialog hovering over the target.
-            super.doOKAction()
+            close(OK_EXIT_CODE)
             executeTyping(
                 editor = editor,
                 text = activeText,
                 openingSequence = openingSequence,
                 closingSequence = closingSequence,
-                delay = delay.toLong(),
-                jitter = jitter,
-                completionDelay = completionDelay.toLong(),
+                delay = settings.delay.toLong(),
+                jitter = settings.jitter,
+                completionDelay = settings.completionDelay.toLong(),
                 scheduler = scheduler,
                 onDone = {
                     importSuppressor.restore()
@@ -641,8 +699,6 @@ class TypeWriterDialog(private val project: Project) :
         if (isDisposed) return
         if (keepOpen) {
             setUiEnabled(true)
-            // Cross-window focus: keep the typed-into editor focused so the user can keep
-            // working there. Plain requestFocusInWindow can't move focus to a different window.
             targetEditor?.let {
                 IdeFocusManager.getInstance(project).requestFocus(it.contentComponent, true)
             }
@@ -666,6 +722,7 @@ class TypeWriterDialog(private val project: Project) :
         } catch (_: Throwable) {
             // panel may already be disposed; not worth surfacing
         }
+        TypeWriterAction.clearOpenDialog(project, this)
         super.dispose()
     }
 
@@ -676,17 +733,19 @@ class TypeWriterDialog(private val project: Project) :
         }
         walk(dialogPanel)
         for (state in tabsState) state.editorField.setViewer(!enabled)
-        okAction.isEnabled = enabled
-        stopAction.isEnabled = !enabled
+        // The single bottom button serves as both Start (when idle) and Stop (when running).
+        // Keep it enabled in both states; just toggle the label.
+        startStopAction.putValue(
+            Action.NAME,
+            if (enabled) message("dialog.start") else message("dialog.stop"),
+        )
+        keepOpenCheckBox.isEnabled = true
     }
 
     private fun persistSettings() {
-        settings.delay = delay
-        settings.jitter = jitter
+        settings.keepOpen = keepOpen
         settings.openingSequence = openingSequence
         settings.closingSequence = closingSequence
-        settings.keepOpen = keepOpen
-        settings.completionDelay = completionDelay
         settings.activeTabIndex = activeTabIndex
         settings.tabs = tabsState.map { it.toData() }.toMutableList()
     }
@@ -721,5 +780,11 @@ class TypeWriterDialog(private val project: Project) :
             it.text = editorField.text
             it.fileTypeName = fileType.name
         }
+    }
+
+    fun bringToFront() {
+        val window = peer.window ?: return
+        window.toFront()
+        window.requestFocus()
     }
 }

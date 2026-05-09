@@ -4,6 +4,23 @@
 
 ## Unreleased
 
+## 0.6.0
+
+### Added
+
+- Macros list in a left column next to the editor (replaces the old top "Templates" row). Description shows on hover; double-click or Enter inserts at the caret. Macros are now called *macros* throughout.
+- Selection-aware insertion: with text selected in the script, double-clicking a macro that has a placeholder (e.g. `Word`, `Namespace`) replaces the selection with the macro and substitutes the selected text into the placeholder.
+- Macro highlighting in the script editor — bold paint on the markers + name in a primary colour, with each colon-separated argument painted in a configurable secondary colour.
+- Settings popup (gear button on the language row) hosting delay, jitter, macro markers, completion delay, macro colour, and macro args colour. Persists across restarts.
+- Single-instance dialog: re-invoking the action focuses the existing window instead of opening a second one.
+
+### Changed
+
+- `Unenrich` is now `Clear macros` and strips every macro (not just `{{complete}}`).
+- "+" to add a tab is overlaid on the tab strip's right edge.
+- "Keep window open" lives next to Start at the bottom-left; the Start button toggles to Stop while typing is in progress; dedicated Stop and Close buttons removed.
+- Macros list sits in a bordered, scrollable column with Enrich/Clear macros header buttons sized to match the tab strip.
+
 ## 0.5.0
 
 ### Added

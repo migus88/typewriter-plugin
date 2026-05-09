@@ -40,6 +40,8 @@ class TypeWriterSettings : PersistentStateComponent<TypeWriterSettings> {
     var closingSequence: String = TypeWriterConstants.defaultClosingSequence
     var keepOpen: Boolean = false
     var completionDelay: Int = TypeWriterConstants.defaultCompletionDelay
+    var macroColor: Int = TypeWriterConstants.defaultMacroColor
+    var macroArgColor: Int = TypeWriterConstants.defaultMacroArgColor
 
     /**
      * Per-language keyword presets used by the enrichment dialog. Lazily populated — a language

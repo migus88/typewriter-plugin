@@ -288,8 +288,8 @@ fun enrichText(
 }
 
 /**
- * Strip every `{{complete:N:Word}}` directive in [text], leaving the bare `Word` in its place.
- * Pause / reformat templates and any other directives are untouched.
+ * Strip every macro from [text]. For `{{complete:N:Word}}` the bare `Word` is preserved in place;
+ * every other macro (pause, reformat, import, caret, …) is removed entirely.
  */
 fun unenrichText(
     text: String,
@@ -298,16 +298,14 @@ fun unenrichText(
 ): String {
     val open = Regex.escape(openingSequence)
     val close = Regex.escape(closingSequence)
-    // Match `complete:<digits>:<anything-up-to-closing-marker>`. The captured word can contain any
-    // characters except the closing marker itself, including spaces and colons, so the inner
-    // group is non-greedy with a lookahead on the marker.
-    val regex = Regex("$open\\s*complete:\\s*\\d+:((?:(?!$close).)*)$close")
-    return regex.replace(text) { it.groupValues[1] }
+    val complete = Regex("$open\\s*complete:\\s*\\d+:((?:(?!$close).)*)$close")
+    val any = Regex("$open(?:(?!$close).)*$close")
+    return any.replace(complete.replace(text) { it.groupValues[1] }) { "" }
 }
 
 /**
  * Index ranges of every `<open>...<close>` span in the source so the enricher can avoid wrapping
- * keywords that are already inside a template.
+ * keywords that are already inside a macro.
  */
 private fun templateMarkerRanges(
     text: String,
