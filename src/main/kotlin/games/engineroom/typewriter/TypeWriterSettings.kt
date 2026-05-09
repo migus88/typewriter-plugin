@@ -40,6 +40,7 @@ class TypeWriterSettings : PersistentStateComponent<TypeWriterSettings> {
     var closingSequence: String = TypeWriterConstants.defaultClosingSequence
     var keepOpen: Boolean = false
     var completionDelay: Int = TypeWriterConstants.defaultCompletionDelay
+    var preExecutionPause: Int = TypeWriterConstants.defaultPreExecutionPause
     var macroColor: Int = TypeWriterConstants.defaultMacroColor
     var macroArgColor: Int = TypeWriterConstants.defaultMacroArgColor
 

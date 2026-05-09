@@ -663,35 +663,58 @@ class TypeWriterDialog(private val project: Project) :
         if (keepOpenSnapshot) {
             setUiEnabled(false)
             IdeFocusManager.getInstance(project).requestFocus(editor.contentComponent, true)
-            executeTyping(
-                editor = editor,
-                text = activeText,
-                openingSequence = openingSequence,
-                closingSequence = closingSequence,
-                delay = settings.delay.toLong(),
-                jitter = settings.jitter,
-                completionDelay = settings.completionDelay.toLong(),
-                scheduler = scheduler,
-                onDone = {
-                    importSuppressor.restore()
-                    onTypingDone()
-                },
-            )
+            try {
+                executeTyping(
+                    editor = editor,
+                    text = activeText,
+                    openingSequence = openingSequence,
+                    closingSequence = closingSequence,
+                    delay = settings.delay.toLong(),
+                    jitter = settings.jitter,
+                    completionDelay = settings.completionDelay.toLong(),
+                    preExecutionPause = settings.preExecutionPause.toLong(),
+                    scheduler = scheduler,
+                    onDone = {
+                        importSuppressor.restore()
+                        onTypingDone()
+                    },
+                )
+            } catch (t: Throwable) {
+                // EDT-side planning errors (bad script, bracket-matching edge cases) used to leave
+                // the dialog frozen with no session to stop. Recover the UI and surface the cause.
+                importSuppressor.restore()
+                setUiEnabled(true)
+                Messages.showErrorDialog(
+                    project,
+                    "Failed to start typing: ${t.javaClass.simpleName}: ${t.message}",
+                    message("dialog.title"),
+                )
+            }
         } else {
             close(OK_EXIT_CODE)
-            executeTyping(
-                editor = editor,
-                text = activeText,
-                openingSequence = openingSequence,
-                closingSequence = closingSequence,
-                delay = settings.delay.toLong(),
-                jitter = settings.jitter,
-                completionDelay = settings.completionDelay.toLong(),
-                scheduler = scheduler,
-                onDone = {
-                    importSuppressor.restore()
-                },
-            )
+            try {
+                executeTyping(
+                    editor = editor,
+                    text = activeText,
+                    openingSequence = openingSequence,
+                    closingSequence = closingSequence,
+                    delay = settings.delay.toLong(),
+                    jitter = settings.jitter,
+                    completionDelay = settings.completionDelay.toLong(),
+                    preExecutionPause = settings.preExecutionPause.toLong(),
+                    scheduler = scheduler,
+                    onDone = {
+                        importSuppressor.restore()
+                    },
+                )
+            } catch (t: Throwable) {
+                importSuppressor.restore()
+                Messages.showErrorDialog(
+                    project,
+                    "Failed to start typing: ${t.javaClass.simpleName}: ${t.message}",
+                    message("dialog.title"),
+                )
+            }
         }
     }
 

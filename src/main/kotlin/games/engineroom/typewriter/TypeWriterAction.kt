@@ -70,6 +70,7 @@ fun executeTyping(
     delay: Long,
     jitter: Int,
     completionDelay: Long,
+    preExecutionPause: Long,
     scheduler: TypewriterExecutorService,
     onDone: () -> Unit,
 ) {
@@ -92,6 +93,7 @@ fun executeTyping(
         .coerceAtLeast(0)
 
     val commands = mutableListOf<Command>()
+    if (preExecutionPause > 0) commands += PauseCommand(preExecutionPause)
     var concatPos = 0
     var lastEnd = 0
 
@@ -314,12 +316,20 @@ fun executeTyping(
                         val afterStart = m.range.last + 1
                         var idx = afterStart
                         val sb = StringBuilder()
-                        while (idx < text.length && text[idx] != '\n' && text[idx].isWhitespace()) {
+                        while (idx < text.length && text[idx] != '\n' && text[idx].isWhitespace() &&
+                            !text.regionMatches(idx, openingSequence, 0, openingSequence.length)
+                        ) {
                             sb.append(text[idx])
                             idx++
                         }
                         val wsLen = sb.length
-                        if (wsLen > 0 && idx < text.length && !text[idx].isWhitespace()) {
+                        // Don't absorb the boundary char if it's the start of the next template's
+                        // opening marker — doing so makes `lastEnd` jump past `m.range.first` of
+                        // the next match, and the next iteration's `text.substring(lastEnd, ...)`
+                        // throws StringIndexOutOfBoundsException on the EDT, freezing the dialog.
+                        if (wsLen > 0 && idx < text.length && !text[idx].isWhitespace() &&
+                            !text.regionMatches(idx, openingSequence, 0, openingSequence.length)
+                        ) {
                             sb.append(text[idx])
                             idx++
                         }

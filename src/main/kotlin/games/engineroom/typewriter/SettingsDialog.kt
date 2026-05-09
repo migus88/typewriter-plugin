@@ -35,6 +35,7 @@ class SettingsDialog(
     var openingSequence: String = settings.openingSequence
     var closingSequence: String = settings.closingSequence
     var completionDelay: Int = settings.completionDelay
+    var preExecutionPause: Int = settings.preExecutionPause
 
     private val colorPanel: ColorPanel = ColorPanel().apply {
         selectedColor = Color(settings.macroColor)
@@ -87,6 +88,14 @@ class SettingsDialog(
                 @Suppress("DialogTitleCapitalization")
                 label(message("dialog.ms"))
             }
+            row {
+                intTextField(IntRange(0, 60000), 5)
+                    .label(message("dialog.pre.execution.pause"))
+                    .bindIntText(::preExecutionPause)
+                    .gap(RightGap.SMALL)
+                @Suppress("DialogTitleCapitalization")
+                label(message("dialog.ms"))
+            }
             row(message("dialog.macro.color")) {
                 cell(colorPanel)
             }
@@ -104,6 +113,7 @@ class SettingsDialog(
         settings.openingSequence = openingSequence
         settings.closingSequence = closingSequence
         settings.completionDelay = completionDelay
+        settings.preExecutionPause = preExecutionPause
         colorPanel.selectedColor?.rgb?.let { settings.macroColor = it }
         argColorPanel.selectedColor?.rgb?.let { settings.macroArgColor = it }
         super.doOKAction()

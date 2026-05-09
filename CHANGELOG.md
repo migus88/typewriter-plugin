@@ -4,6 +4,20 @@
 
 ## Unreleased
 
+## 0.6.1
+
+### Fixed
+
+- UI freeze when two `{{complete}}` macros sat next to each other (e.g. `{{complete:3:public}} {{complete:3:static}}`). The tail-absorber used to grab the next non-whitespace char unconditionally; when that char was the `{` of an immediately-following `{{` marker, parsing crashed on the EDT and the dialog stayed greyed out with no session to stop. The absorber now stops at the next macro marker.
+
+### Added
+
+- `Pre-execution pause` setting (default 1000 ms) — held at the start of every typing run so the editor caret has time to focus before typing begins.
+
+### Changed
+
+- Wrapped the typing-start path in error handling: any planning error now restores the UI and shows an error dialog instead of locking the user out.
+
 ## 0.6.0
 
 ### Added
