@@ -136,6 +136,33 @@ Templates are inline directives in the source text, wrapped in the configured op
 
 `CaretMoveByDirectionCommand` does one `caret.moveCaretRelatively(...)` step per command. The parser emits N copies so each press takes its own typewriter tick (and the standard delay/jitter pacing applies between presses, same way `complete` and the bracket-pair sequencer work). The action accepts both `caret` and `carret` so the typo is forgivable.
 
+### `{{backspace:N}}` and `{{backspace-hold:N}}` — deletion
+
+Two macros, two routing rules:
+
+- `{{backspace:N}}` parses to **N** copies of `BackspaceCommand`, each going through `IdeActions.ACTION_EDITOR_BACKSPACE` so language smart-backspace fires (Python dedent, Rider whitespace fixups, etc.). One click sound + jittered pause per press — paced like real-user typing.
+- `{{backspace-hold:N}}` parses to **one** `BackspaceHoldCommand` that calls `Document.deleteString(end - N, end)` inside a `WriteCommandAction`. One sound, one mutation, one pause — imitates press-and-hold. Bypasses the action handler (no per-step language work).
+
+`BackspaceHoldCommand` clamps the start offset to 0 so a too-large `N` just deletes everything before the caret instead of throwing. Both commands set `indentOwnedByIde = false` since they explicitly mutate the document/caret.
+
+### `{{goto:TARGET}}` and `{{goto:TARGET:ANCHOR}}` — caret walk to a string
+
+`GotoCommand` is a **single command that internally loops** rather than a sequence of pre-planned arrow-key commands. The reason is timing: the search resolves against the *destination editor*'s document at execution time (the script may have already typed text into it), so the path can't be computed at planning time.
+
+Search rule:
+- No anchor → first occurrence of `target` from offset 0 wins.
+- With anchor → find `anchor` first from offset 0, then search for `target` starting where `anchor` ends. The anchor is purely a search-bound disambiguator; only `target`'s end position matters for the landing offset.
+
+Stepping rule (recomputed each tick from the live caret offset):
+1. `currentLine < targetLine` → press Down.
+2. `currentLine > targetLine` → press Up.
+3. Same line, `currentCol < targetCol` → Right.
+4. Same line, `currentCol > targetCol` → Left.
+
+Each step plays a click sound and uses the typewriter's `delay` + `jitter` for pacing — so the caret crawl feels like the same hand that's typing the script. The loop has a `(documentLength + 64)`-step safety budget so a logic bug can't burn unbounded time. By construction, `targetCol ≤ targetLine.length` (the offset comes from a substring match within the document), so convergence is well-defined and the budget should never be exhausted in practice.
+
+Args parsing splits `rest` on the **first** colon — `target` is everything before, `anchor` is everything after (or null). Neither part may itself contain `:`. Failed lookups silently no-op (after the post-pause), matching the rest of the macro set.
+
 The dialog itself surfaces the available templates in a **Templates** `JBList` at the top (above the language combo and tabs). Each entry is a `TemplateEntry(kind)` where `kind` is the `TemplateKind` enum (`PAUSE`, `REFORMAT`, `COMPLETE`, `IMPORT_AUTO`, `IMPORT_NS`, `IMPORT_OPTION`, `CARET`). The list's cell renderer rebuilds the syntax string on every paint by reading the live `openingSequence`/`closingSequence` properties. Double-click or Enter calls `insertTemplate(entry)`, which writes the rendered syntax at the active tab's caret inside a `WriteCommandAction` and re-focuses the editor field.
 
   **bindText gotcha:** the kotlin UI DSL's `bindText(::property)` only flushes the field's value to the bound property on `panel.apply()` — i.e., on OK. Reading `openingSequence` mid-edit gives you the *original* value, not what the user just typed. The dialog therefore captures `openingField` / `closingField` references and installs a `DocumentListener` that mirrors each keystroke into both properties **and** repaints `templateList`. Without this, the templates list and the inserted syntax both go stale.

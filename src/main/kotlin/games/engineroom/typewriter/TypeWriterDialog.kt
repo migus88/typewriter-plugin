@@ -631,6 +631,14 @@ class TypeWriterDialog(private val project: Project) :
         ),
         IMPORT_OPTION("{O}import:300::2{C}", "macro.import.option.description"),
         CARET("{O}caret:up:3{C}", "macro.caret.description"),
+        BACKSPACE("{O}backspace:5{C}", "macro.backspace.description"),
+        BACKSPACE_HOLD("{O}backspace-hold:5{C}", "macro.backspace.hold.description"),
+        GOTO("{O}goto:String{C}", "macro.goto.description", placeholder = "String"),
+        GOTO_ANCHOR(
+            "{O}goto:Target:Anchor{C}",
+            "macro.goto.anchor.description",
+            placeholder = "Target",
+        ),
     }
 
     private class MacroEntry(val kind: MacroKind) {

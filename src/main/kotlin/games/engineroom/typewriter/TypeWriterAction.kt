@@ -1,9 +1,12 @@
 package games.engineroom.typewriter
 
+import games.engineroom.typewriter.commands.BackspaceCommand
+import games.engineroom.typewriter.commands.BackspaceHoldCommand
 import games.engineroom.typewriter.commands.CaretDirection
 import games.engineroom.typewriter.commands.CaretMoveByDirectionCommand
 import games.engineroom.typewriter.commands.Command
 import games.engineroom.typewriter.commands.EnterCommand
+import games.engineroom.typewriter.commands.GotoCommand
 import games.engineroom.typewriter.commands.ImportCommand
 import games.engineroom.typewriter.commands.MoveCaretCommand
 import games.engineroom.typewriter.commands.PauseCommand
@@ -275,6 +278,53 @@ fun executeTyping(
                     stepDelayMs = delay.toInt(),
                     pauseAfter = pause(),
                 )
+            }
+            // Per-character backspace: N individual presses, each with a click sound and the
+            // standard jittered pause. Goes through the IDE's backspace action so language smart-
+            // backspace (Python dedent, Rider whitespace fixups, …) fires per press.
+            "backspace" -> {
+                val n = rest.trim().toIntOrNull() ?: 0
+                if (n > 0) {
+                    indentOwnedByIde = false
+                    repeat(n) {
+                        commands += BackspaceCommand(pause(), editor)
+                    }
+                }
+            }
+            // Press-and-hold backspace: one document mutation, one click sound, one pause.
+            "backspace-hold" -> {
+                val n = rest.trim().toIntOrNull() ?: 0
+                if (n > 0) {
+                    indentOwnedByIde = false
+                    commands += BackspaceHoldCommand(n, pause(), editor)
+                }
+            }
+            // Walk the caret (arrow-key steps, sound per press) to right after `target`. Optional
+            // `anchor` disambiguates: search for `anchor` first, then for `target` after it.
+            // Splits `rest` on the *first* colon — so target/anchor can't themselves contain
+            // colons. Always searches from offset 0; whitespace inside is preserved as typed.
+            "goto" -> {
+                indentOwnedByIde = false
+                val firstArgColon = rest.indexOf(':')
+                val target: String
+                val anchor: String?
+                if (firstArgColon < 0) {
+                    target = rest
+                    anchor = null
+                } else {
+                    target = rest.substring(0, firstArgColon)
+                    anchor = rest.substring(firstArgColon + 1).ifEmpty { null }
+                }
+                if (target.isNotEmpty()) {
+                    commands += GotoCommand(
+                        target = target,
+                        anchor = anchor,
+                        stepDelay = delay,
+                        jitter = jitter,
+                        editor = editor,
+                        pauseAfter = pause(),
+                    )
+                }
             }
             "complete" -> {
                 indentOwnedByIde = false
