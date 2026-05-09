@@ -1,0 +1,423 @@
+package games.engineroom.typewriter
+
+import com.intellij.icons.AllIcons
+import com.intellij.openapi.editor.EditorFactory
+import com.intellij.openapi.fileTypes.PlainTextFileType
+import com.intellij.openapi.project.Project
+import com.intellij.openapi.ui.DialogWrapper
+import com.intellij.openapi.ui.DialogWrapper.IdeModalityType
+import com.intellij.openapi.ui.Messages
+import com.intellij.testFramework.LightVirtualFile
+import com.intellij.openapi.fileEditor.FileDocumentManager
+import com.intellij.ui.EditorTextField
+import com.intellij.ui.OnePixelSplitter
+import com.intellij.ui.components.JBList
+import com.intellij.ui.components.JBScrollPane
+import com.intellij.ui.components.JBTextField
+import com.intellij.util.ui.JBUI
+import games.engineroom.typewriter.TypeWriterBundle.message
+import java.awt.BorderLayout
+import java.awt.Color
+import java.awt.Component
+import java.awt.Dimension
+import java.awt.FlowLayout
+import java.awt.Font
+import java.awt.Point
+import javax.swing.DefaultListModel
+import javax.swing.JButton
+import javax.swing.JComponent
+import javax.swing.JLabel
+import javax.swing.JPanel
+import javax.swing.ListCellRenderer
+import javax.swing.ListSelectionModel
+import javax.swing.SwingUtilities
+import javax.swing.event.DocumentEvent
+import javax.swing.event.DocumentListener
+
+/**
+ * Modal popup for managing user-defined macros. Each entry has a name (typed inside the
+ * configured markers, e.g. `{{prop}}`) and a content body — anything that can appear in a tab's
+ * editor. Edits live in a working list copy; the changes commit to [settings] only on OK.
+ *
+ * Layout: list of macros on the left, name + content editor on the right. Buttons under the list
+ * add or delete entries. Validation runs on OK — invalid names (empty, whitespace, `:`, built-in
+ * collision, duplicates) keep the dialog open with a focused error.
+ */
+class CustomMacrosDialog(
+    private val project: Project,
+    private val parentComponent: Component,
+    private val settings: TypeWriterSettings,
+    private val openingSequence: String,
+    private val closingSequence: String,
+) : DialogWrapper(project, parentComponent, true, IdeModalityType.IDE) {
+
+    private data class Working(
+        var name: String,
+        var parameters: MutableList<String>,
+        var content: String,
+    )
+
+    private val working: MutableList<Working> = settings.customMacros
+        .map { Working(it.name, it.parameters.toMutableList(), it.content) }
+        .toMutableList()
+
+    private val listModel: DefaultListModel<Working> = DefaultListModel<Working>().apply {
+        for (w in working) addElement(w)
+    }
+
+    private val macroList: JBList<Working> = JBList(listModel).apply {
+        selectionMode = ListSelectionModel.SINGLE_SELECTION
+        cellRenderer = makeRenderer()
+    }
+
+    private val nameField: JBTextField = JBTextField().apply {
+        emptyText.text = message("custom.macros.name.placeholder")
+    }
+    private val paramsField: JBTextField = JBTextField().apply {
+        emptyText.text = message("custom.macros.parameters.placeholder")
+        toolTipText = message("custom.macros.parameters.tooltip")
+    }
+    private val contentField: EditorTextField = createContentEditor()
+
+    private val addButton: JButton = JButton(AllIcons.General.Add).apply {
+        toolTipText = message("custom.macros.add.tooltip")
+        addActionListener { addEntry() }
+    }
+    private val deleteButton: JButton = JButton(AllIcons.General.Remove).apply {
+        toolTipText = message("custom.macros.delete.tooltip")
+        addActionListener { deleteSelected() }
+    }
+
+    /** Set while we're loading the right pane from a list selection — avoids feedback loops. */
+    private var suppressFieldListeners: Boolean = false
+
+    init {
+        title = message("custom.macros.dialog.title")
+        isModal = true
+
+        macroList.addListSelectionListener { event ->
+            if (!event.valueIsAdjusting) loadSelectedIntoFields()
+        }
+        nameField.document.addDocumentListener(object : DocumentListener {
+            override fun insertUpdate(e: DocumentEvent) = pushNameToModel()
+            override fun removeUpdate(e: DocumentEvent) = pushNameToModel()
+            override fun changedUpdate(e: DocumentEvent) = pushNameToModel()
+        })
+        paramsField.document.addDocumentListener(object : DocumentListener {
+            override fun insertUpdate(e: DocumentEvent) = pushParamsToModel()
+            override fun removeUpdate(e: DocumentEvent) = pushParamsToModel()
+            override fun changedUpdate(e: DocumentEvent) = pushParamsToModel()
+        })
+        contentField.document.addDocumentListener(
+            object : com.intellij.openapi.editor.event.DocumentListener {
+                override fun documentChanged(event: com.intellij.openapi.editor.event.DocumentEvent) {
+                    pushContentToModel()
+                }
+            },
+            disposable,
+        )
+
+        if (working.isNotEmpty()) macroList.selectedIndex = 0 else clearFields()
+        updateFieldsEnabled()
+
+        init()
+    }
+
+    private fun createContentEditor(): EditorTextField {
+        val virtualFile = LightVirtualFile("custom_macro.txt", PlainTextFileType.INSTANCE, "")
+        val document = FileDocumentManager.getInstance().getDocument(virtualFile)
+            ?: EditorFactory.getInstance().createDocument("")
+        return EditorTextField(document, project, PlainTextFileType.INSTANCE, false, false).apply {
+            preferredSize = Dimension(420, 280)
+            addSettingsProvider { editor ->
+                editor.settings.isLineNumbersShown = true
+                editor.settings.isUseSoftWraps = true
+                editor.settings.additionalLinesCount = 0
+                editor.settings.isCaretRowShown = true
+                editor.setVerticalScrollbarVisible(true)
+                MacroHighlighter(
+                    editor,
+                    disposable,
+                    { openingSequence },
+                    { closingSequence },
+                    { Color(settings.macroColor) },
+                    { Color(settings.macroArgColor) },
+                )
+            }
+        }
+    }
+
+    override fun createCenterPanel(): JComponent {
+        val listScroll = JBScrollPane(
+            macroList,
+            javax.swing.ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
+            javax.swing.ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED,
+        ).apply {
+            border = JBUI.Borders.customLine(com.intellij.ui.JBColor.border(), 1)
+            preferredSize = Dimension(220, 320)
+        }
+        val listButtons = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
+            isOpaque = false
+            val sq = Dimension(28, 28)
+            addButton.preferredSize = sq
+            deleteButton.preferredSize = sq
+            add(addButton)
+            add(deleteButton)
+        }
+        val leftPane = JPanel(BorderLayout(0, 4)).apply {
+            add(listScroll, BorderLayout.CENTER)
+            add(listButtons, BorderLayout.SOUTH)
+            preferredSize = Dimension(240, 360)
+        }
+
+        // Two-column GridBag-ish layout via BoxLayout: stacked rows, each row is a labelled
+        // field. Keeps the form compact and aligns the labels' baselines with the inputs.
+        val labelWidth = JLabel(message("custom.macros.parameters.label")).preferredSize.width + 8
+        fun labelled(text: String, field: JComponent): JPanel = JPanel(BorderLayout(8, 0)).apply {
+            isOpaque = false
+            val label = JLabel(text)
+            label.preferredSize = Dimension(labelWidth, label.preferredSize.height)
+            add(label, BorderLayout.WEST)
+            add(field, BorderLayout.CENTER)
+        }
+        val nameRow = labelled(message("custom.macros.name.label"), nameField)
+        val paramsRow = labelled(message("custom.macros.parameters.label"), paramsField)
+
+        val formRows = JPanel().apply {
+            isOpaque = false
+            layout = javax.swing.BoxLayout(this, javax.swing.BoxLayout.Y_AXIS)
+            add(nameRow)
+            add(javax.swing.Box.createVerticalStrut(4))
+            add(paramsRow)
+        }
+        val rightHeader = JPanel(BorderLayout(0, 4)).apply {
+            add(formRows, BorderLayout.NORTH)
+            add(JLabel(message("custom.macros.content.label")), BorderLayout.SOUTH)
+        }
+        val rightPane = JPanel(BorderLayout(0, 4)).apply {
+            add(rightHeader, BorderLayout.NORTH)
+            add(contentField, BorderLayout.CENTER)
+            preferredSize = Dimension(440, 360)
+        }
+
+        return OnePixelSplitter(false, 0.32f).apply {
+            firstComponent = leftPane
+            secondComponent = rightPane
+            setHonorComponentsMinimumSize(true)
+            preferredSize = Dimension(720, 380)
+        }
+    }
+
+    override fun getPreferredFocusedComponent(): JComponent =
+        if (working.isEmpty()) addButton else nameField
+
+    /**
+     * Render an entry as `{{name}}` (or `{{name:Param1:Param2}}` when parameters are defined),
+     * so the list reflects exactly the call shape that gets typed into a script.
+     */
+    private fun makeRenderer(): ListCellRenderer<in Working> = ListCellRenderer { list, value, _, selected, _ ->
+        JPanel(BorderLayout()).apply {
+            isOpaque = true
+            background = if (selected) list.selectionBackground else list.background
+            border = JBUI.Borders.empty(4, 8)
+            val displayName = value.name.ifEmpty { message("custom.macros.unnamed") }
+            val paramsTail = if (value.parameters.isEmpty()) "" else ":${value.parameters.joinToString(":")}"
+            val rendered = "$openingSequence$displayName$paramsTail$closingSequence"
+            val label = JLabel(rendered).apply {
+                font = Font(Font.MONOSPACED, Font.PLAIN, font.size)
+                foreground = when {
+                    selected -> list.selectionForeground
+                    value.name.isEmpty() -> com.intellij.util.ui.UIUtil.getInactiveTextColor()
+                    else -> list.foreground
+                }
+            }
+            add(label, BorderLayout.WEST)
+        }
+    }
+
+    private fun loadSelectedIntoFields() {
+        val idx = macroList.selectedIndex
+        suppressFieldListeners = true
+        try {
+            if (idx < 0 || idx >= working.size) {
+                clearFields()
+            } else {
+                val w = working[idx]
+                nameField.text = w.name
+                paramsField.text = w.parameters.joinToString(", ")
+                contentField.text = w.content
+            }
+        } finally {
+            suppressFieldListeners = false
+        }
+        updateFieldsEnabled()
+    }
+
+    private fun clearFields() {
+        nameField.text = ""
+        paramsField.text = ""
+        contentField.text = ""
+    }
+
+    private fun updateFieldsEnabled() {
+        val hasSelection = macroList.selectedIndex in 0 until working.size
+        nameField.isEnabled = hasSelection
+        paramsField.isEnabled = hasSelection
+        contentField.isEnabled = hasSelection
+        deleteButton.isEnabled = hasSelection
+    }
+
+    private fun pushNameToModel() {
+        if (suppressFieldListeners) return
+        val idx = macroList.selectedIndex
+        if (idx < 0 || idx >= working.size) return
+        working[idx].name = nameField.text
+        listModel.set(idx, working[idx])
+    }
+
+    private fun pushParamsToModel() {
+        if (suppressFieldListeners) return
+        val idx = macroList.selectedIndex
+        if (idx < 0 || idx >= working.size) return
+        working[idx].parameters = parseParameters(paramsField.text)
+        listModel.set(idx, working[idx])
+    }
+
+    private fun pushContentToModel() {
+        if (suppressFieldListeners) return
+        val idx = macroList.selectedIndex
+        if (idx < 0 || idx >= working.size) return
+        working[idx].content = contentField.text
+    }
+
+    private fun addEntry() {
+        val newEntry = Working(suggestNewName(), mutableListOf(), "")
+        working += newEntry
+        listModel.addElement(newEntry)
+        val newIdx = working.size - 1
+        macroList.selectedIndex = newIdx
+        macroList.ensureIndexIsVisible(newIdx)
+        SwingUtilities.invokeLater { nameField.requestFocusInWindow() }
+    }
+
+    /** Split the params field on commas (or whitespace), trim, drop empties. */
+    private fun parseParameters(raw: String): MutableList<String> =
+        raw.split(',', ' ', '\t').map { it.trim() }.filter { it.isNotEmpty() }.toMutableList()
+
+    private fun deleteSelected() {
+        val idx = macroList.selectedIndex
+        if (idx < 0 || idx >= working.size) return
+        working.removeAt(idx)
+        listModel.remove(idx)
+        if (working.isNotEmpty()) {
+            val nextIdx = idx.coerceAtMost(working.size - 1)
+            macroList.selectedIndex = nextIdx
+        } else {
+            clearFields()
+            updateFieldsEnabled()
+        }
+    }
+
+    private fun suggestNewName(): String {
+        val taken = working.map { it.name }.toSet()
+        var n = 1
+        while ("macro$n" in taken) n++
+        return "macro$n"
+    }
+
+    override fun doOKAction() {
+        // Trim each name in place so trailing-space typos don't persist; the trim'd value is
+        // also what gets validated below.
+        for (w in working) w.name = w.name.trim()
+
+        val invalid = working.firstOrNull { !isValidName(it.name) }
+        if (invalid != null) {
+            macroList.selectedIndex = working.indexOf(invalid)
+            Messages.showErrorDialog(
+                project,
+                message("custom.macros.invalid.name", invalid.name.ifEmpty { "(empty)" }),
+                message("custom.macros.dialog.title"),
+            )
+            return
+        }
+        val seen = mutableSetOf<String>()
+        val dup = working.firstOrNull { !seen.add(it.name) }
+        if (dup != null) {
+            macroList.selectedIndex = working.indexOf(dup)
+            Messages.showErrorDialog(
+                project,
+                message("custom.macros.duplicate", dup.name),
+                message("custom.macros.dialog.title"),
+            )
+            return
+        }
+
+        for (w in working) {
+            val badParam = w.parameters.firstOrNull { !isValidParamName(it) }
+            if (badParam != null) {
+                macroList.selectedIndex = working.indexOf(w)
+                Messages.showErrorDialog(
+                    project,
+                    message("custom.macros.invalid.parameter", badParam, w.name),
+                    message("custom.macros.dialog.title"),
+                )
+                return
+            }
+            val seenParams = mutableSetOf<String>()
+            val dupParam = w.parameters.firstOrNull { !seenParams.add(it) }
+            if (dupParam != null) {
+                macroList.selectedIndex = working.indexOf(w)
+                Messages.showErrorDialog(
+                    project,
+                    message("custom.macros.duplicate.parameter", dupParam, w.name),
+                    message("custom.macros.dialog.title"),
+                )
+                return
+            }
+        }
+
+        settings.customMacros = working
+            .map { w ->
+                CustomMacroData().apply {
+                    name = w.name
+                    parameters = w.parameters.toMutableList()
+                    content = w.content
+                }
+            }
+            .toMutableList()
+        super.doOKAction()
+    }
+
+    /**
+     * `(project, parentComponent, …)` already wires window ownership, but the project-aware path
+     * still centres the dialog on the IDE frame. Compute the centre relative to the typewriter
+     * window so the popup lands on top of it (mirrors [SettingsDialog]).
+     */
+    override fun getInitialLocation(): Point? {
+        val parentWindow = SwingUtilities.getWindowAncestor(parentComponent) ?: return null
+        val pref = preferredSize ?: return null
+        val x = parentWindow.x + (parentWindow.width - pref.width) / 2
+        val y = parentWindow.y + (parentWindow.height - pref.height) / 2
+        return Point(x.coerceAtLeast(0), y.coerceAtLeast(0))
+    }
+
+    private fun isValidName(name: String): Boolean {
+        if (name.isEmpty()) return false
+        if (name.any { it.isWhitespace() }) return false
+        if (':' in name) return false
+        if (name.contains(openingSequence) || name.contains(closingSequence)) return false
+        if (name in BUILT_IN_MACRO_NAMES) return false
+        return true
+    }
+
+    /**
+     * Parameter names get embedded into a regex (`$name$`) at expansion time, so they need to be
+     * a plain identifier — letters, digits, underscore, and not starting with a digit. The regex
+     * `\w+` matches them, so any name we accept here will round-trip through [substituteMacroParams].
+     */
+    private fun isValidParamName(name: String): Boolean {
+        if (name.isEmpty()) return false
+        if (!name[0].isLetter() && name[0] != '_') return false
+        return name.all { it.isLetterOrDigit() || it == '_' }
+    }
+}

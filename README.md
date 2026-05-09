@@ -56,6 +56,16 @@ Macros are inline directives wrapped in configurable markers (default `{{` and `
 
 The marker tokens (default `{{` / `}}`) are configurable in **Settings** and update live in the macro list and the macro highlighter.
 
+## Custom macros
+
+Click **Custom macros…** under the macro list to open a popup that manages your own user-defined macros. Each entry has a **name**, an optional ordered list of **parameters**, and a **content** body — when the script later contains `{{name}}` (or `{{name:arg1:arg2}}` for parameterised macros), it gets substituted with that content before the typing pipeline runs.
+
+- A custom macro named `prop` becomes `{{prop}}` in your scripts. Custom macros appear at the bottom of the macro list, separated from the built-ins by a divider line and rendered in italic; double-click (or press <kbd>Enter</kbd>) to insert the syntax at the active tab's caret.
+- **Parameters** are positional. Define them as a comma-separated list (e.g. `name, type`) and reference each one in the content as `$name$` (live-template style). Calling `{{prop:foo:int}}` then substitutes `$name$` → `foo`, `$type$` → `int`. Missing arguments resolve to empty strings; extras are ignored. Parameter names must be identifier-like (letters, digits, underscore; must start with a letter or underscore) and unique within a macro. Custom macros without parameters are called as `{{name}}` and skip substitution entirely.
+- Content is plain text and can itself contain other macros — built-in (`{{pause:500}}`, `{{complete:3:Word}}`, …) or other custom names. Expansion is recursive with cycle protection, so a custom macro that references itself (or two macros that reference each other) won't loop forever.
+- The macro **name** can't collide with built-in macros (`pause`, `reformat`, `complete`, `import`, `caret`, `backspace`, `backspace-hold`, `goto`, `snip`, `key`), can't contain whitespace or `:`, and must be unique.
+- Definitions persist across IDE restarts.
+
 ## Enrichment
 
 Click **Enrich…** to wrap matching language keywords in your script with `{{complete}}` macros automatically — useful when you want a screencast to feel like real typing without authoring every completion beat by hand.

@@ -4,6 +4,13 @@
 
 ## Unreleased
 
+## 0.9.0
+
+### Added
+
+- **Custom macros.** A new **Custom macros…** popup (button under the macro list) manages user-defined macros. Each entry has a name, an optional ordered list of parameters, and a content body — typing `{{name}}` (or `{{name:arg1:arg2}}` for parameterised macros) into a script substitutes the body before the typing pipeline runs. Parameters are referenced inside the content as `$paramName$` (live-template style); missing args resolve to empty, extras are ignored. Expansion is recursive with cycle protection so a macro can reference other macros (built-in or custom) without looping. Custom names are validated against built-in collisions, whitespace, and `:`; parameter names must be identifier-like.
+- Custom macros surface in the main macro list under the built-ins, separated by a divider line and rendered in italic. Double-click (or <kbd>Enter</kbd>) inserts the call shape `{{name:Param1:Param2}}` at the active tab's caret; if a selection is active, it replaces the first parameter slot.
+
 ## 0.8.0
 
 ### Added

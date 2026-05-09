@@ -119,18 +119,26 @@ class TypeWriterDialog(private val project: Project) :
         toolTipText = message("dialog.clear.macros.tooltip")
         addActionListener { clearMacrosInActiveTab() }
     }
+    private val customMacrosButton: JButton = JButton(message("dialog.custom.macros")).apply {
+        toolTipText = message("dialog.custom.macros.tooltip")
+        addActionListener { openCustomMacrosDialog() }
+    }
     private val keepOpenCheckBox: JCheckBox = JCheckBox(message("dialog.keep.open"), keepOpen).apply {
         addActionListener { keepOpen = isSelected }
     }
 
+    /** Backing model for [macroList] — repopulated whenever custom macros change. */
+    private val macroListModel: javax.swing.DefaultListModel<MacroEntry> =
+        javax.swing.DefaultListModel<MacroEntry>().also { rebuildMacroEntries(it) }
+
     private val macroList: JBList<MacroEntry> =
-        object : JBList<MacroEntry>(MacroKind.entries.map { MacroEntry(it) }) {
+        object : JBList<MacroEntry>(macroListModel) {
             override fun getToolTipText(event: MouseEvent): String? {
                 val idx = locationToIndex(event.point)
                 if (idx < 0) return null
                 val cellBounds = getCellBounds(idx, idx) ?: return null
                 if (!cellBounds.contains(event.point)) return null
-                return message(model.getElementAt(idx).kind.descriptionKey)
+                return model.getElementAt(idx).tooltip()
             }
         }.apply {
             selectionMode = ListSelectionModel.SINGLE_SELECTION
@@ -154,6 +162,14 @@ class TypeWriterDialog(private val project: Project) :
                 }
             })
         }
+
+    private fun rebuildMacroEntries(model: javax.swing.DefaultListModel<MacroEntry>) {
+        model.clear()
+        for (kind in MacroKind.entries) model.addElement(MacroEntry.BuiltIn(kind))
+        for (data in settings.customMacros) {
+            model.addElement(MacroEntry.Custom(data.name, data.parameters.toList()))
+        }
+    }
 
     private val startStopAction: Action = object : DialogWrapperAction(message("dialog.start")) {
         init {
@@ -396,13 +412,14 @@ class TypeWriterDialog(private val project: Project) :
         // Match the macros-header buttons' height to the tab strip's natural height so the two
         // header rows line up across the splitter.
         val tabH = 30
-        listOf(enrichButton, clearMacrosButton).forEach {
+        listOf(enrichButton, clearMacrosButton, customMacrosButton).forEach {
             it.preferredSize = Dimension(it.preferredSize.width, tabH)
             it.margin = Insets(0, 12, 0, 12)
         }
         val macroHeader = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
             add(enrichButton)
             add(clearMacrosButton)
+            add(customMacrosButton)
         }
         val macroColumn = JPanel(BorderLayout(0, 0)).apply {
             preferredSize = Dimension(240, 0)
@@ -455,16 +472,29 @@ class TypeWriterDialog(private val project: Project) :
      * Macro list renderer — single-column list of monospaced macro syntax. Description text is
      * surfaced via the list's per-cell tooltip rather than alongside the syntax to keep the panel
      * narrow.
+     *
+     * Custom macros render in italic and the first one carries a 1-pixel top border, separating
+     * the user's macros from the built-ins above without needing a non-selectable header row.
      */
     private fun makeMacroRenderer(): ListCellRenderer<in MacroEntry> =
-        ListCellRenderer { list, value, _, selected, _ ->
+        ListCellRenderer { list, value, index, selected, _ ->
+            val isCustom = value is MacroEntry.Custom
+            val isFirstCustom = isCustom &&
+                (index == 0 || list.model.getElementAt(index - 1) !is MacroEntry.Custom)
             val panel = JPanel(BorderLayout()).apply {
                 isOpaque = true
                 background = if (selected) list.selectionBackground else list.background
-                border = JBUI.Borders.empty(4, 8)
+                border = if (isFirstCustom) {
+                    JBUI.Borders.compound(
+                        JBUI.Borders.customLine(com.intellij.ui.JBColor.border(), 1, 0, 0, 0),
+                        JBUI.Borders.empty(4, 8),
+                    )
+                } else {
+                    JBUI.Borders.empty(4, 8)
+                }
             }
             val syntax = JLabel(value.render(openingSequence, closingSequence)).apply {
-                font = Font(Font.MONOSPACED, Font.PLAIN, font.size)
+                font = Font(Font.MONOSPACED, if (isCustom) Font.ITALIC else Font.PLAIN, font.size)
                 foreground = if (selected) list.selectionForeground else list.foreground
             }
             panel.add(syntax, BorderLayout.WEST)
@@ -480,6 +510,19 @@ class TypeWriterDialog(private val project: Project) :
         closingSequence = settings.closingSequence
         macroList.repaint()
         for (h in macroHighlighters) h.refresh()
+    }
+
+    private fun openCustomMacrosDialog() {
+        val dialog = CustomMacrosDialog(
+            project = project,
+            parentComponent = dialogPanel,
+            settings = settings,
+            openingSequence = openingSequence,
+            closingSequence = closingSequence,
+        )
+        if (!dialog.showAndGet()) return
+        rebuildMacroEntries(macroListModel)
+        macroList.repaint()
     }
 
     private fun openEnrichDialog() {
@@ -565,7 +608,7 @@ class TypeWriterDialog(private val project: Project) :
         val selectedText = if (hasSelection) selectionModel.selectedText.orEmpty() else ""
 
         val syntax = entry.render(openingSequence, closingSequence).let { rendered ->
-            val placeholder = entry.kind.placeholder
+            val placeholder = entry.placeholder()
             if (hasSelection && placeholder != null && rendered.contains(placeholder)) {
                 rendered.replace(placeholder, selectedText)
             } else {
@@ -628,9 +671,35 @@ class TypeWriterDialog(private val project: Project) :
         KEY_ENTER("{O}key:enter{C}", "macro.key.enter.description"),
     }
 
-    private class MacroEntry(val kind: MacroKind) {
-        fun render(open: String, close: String): String =
-            kind.pattern.replace("{O}", open).replace("{C}", close)
+    private sealed class MacroEntry {
+        abstract fun render(open: String, close: String): String
+        abstract fun tooltip(): String?
+        abstract fun placeholder(): String?
+
+        class BuiltIn(val kind: MacroKind) : MacroEntry() {
+            override fun render(open: String, close: String): String =
+                kind.pattern.replace("{O}", open).replace("{C}", close)
+            override fun tooltip(): String = message(kind.descriptionKey)
+            override fun placeholder(): String? = kind.placeholder
+        }
+
+        /**
+         * Custom macros render as `{{name}}` (or `{{name:Param1:Param2}}` when parameters are
+         * defined). They expand to literal text via [expandCustomMacros] before the typing
+         * pipeline sees them, with each `$paramName$` reference in the body substituted by the
+         * matching positional argument.
+         */
+        class Custom(val name: String, val parameters: List<String>) : MacroEntry() {
+            override fun render(open: String, close: String): String {
+                if (parameters.isEmpty()) return "$open$name$close"
+                return "$open$name:${parameters.joinToString(":")}$close"
+            }
+            override fun tooltip(): String = TypeWriterBundle.message("macro.custom.description")
+            // The first parameter doubles as the placeholder so a selection-replace insert
+            // (insertMacro) drops the highlighted token into the first positional argument slot,
+            // matching how built-in placeholders like `Word`/`Namespace` behave.
+            override fun placeholder(): String? = parameters.firstOrNull()
+        }
     }
 
     override fun createActions(): Array<Action> = arrayOf(startStopAction)
@@ -669,6 +738,7 @@ class TypeWriterDialog(private val project: Project) :
                     completionDelay = settings.completionDelay.toLong(),
                     preExecutionPause = settings.preExecutionPause.toLong(),
                     scheduler = scheduler,
+                    customMacros = settings.customMacros,
                     onDone = {
                         importSuppressor.restore()
                         onTypingDone()
@@ -698,6 +768,7 @@ class TypeWriterDialog(private val project: Project) :
                     completionDelay = settings.completionDelay.toLong(),
                     preExecutionPause = settings.preExecutionPause.toLong(),
                     scheduler = scheduler,
+                    customMacros = settings.customMacros,
                     onDone = {
                         importSuppressor.restore()
                     },

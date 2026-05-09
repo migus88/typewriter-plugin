@@ -51,6 +51,14 @@ class TypeWriterSettings : PersistentStateComponent<TypeWriterSettings> {
     @get:XCollection(style = XCollection.Style.v2)
     var enrichmentPresets: MutableList<EnrichmentPreset> = mutableListOf()
 
+    /**
+     * User-defined macros. Each entry maps a name (used as `{{name}}` in scripts) to literal
+     * content that gets substituted in before the rest of the typing pipeline runs. Substitution
+     * is recursive so a custom macro can reference other custom or built-in macros.
+     */
+    @get:XCollection(style = XCollection.Style.v2)
+    var customMacros: MutableList<CustomMacroData> = mutableListOf()
+
     /** Last-selected enrichment mode, persisted so the dialog re-opens on the same setting. */
     var enrichmentMode: String = EnrichmentMode.HEAVY.name
 
@@ -88,4 +96,25 @@ class TabData {
     var fileTypeName: String = ""
 
     var text: String = ""
+}
+
+/**
+ * Persistence record for one user-defined macro.
+ *
+ * - [name] is the identifier typed inside the markers (e.g. "prop" → `{{prop}}` or
+ *   `{{prop:Foo:int}}` when the macro takes parameters).
+ * - [parameters] is the ordered list of positional parameter names. Each name may be referenced
+ *   inside [content] as `$name$` (live-template style) and gets substituted at call time.
+ * - [content] is the literal expansion. May contain other macros (built-in or custom) — they're
+ *   re-processed by the typing pipeline after expansion.
+ */
+@Tag("customMacro")
+class CustomMacroData {
+    @get:Attribute("name")
+    var name: String = ""
+
+    @get:XCollection(style = XCollection.Style.v2, elementName = "param")
+    var parameters: MutableList<String> = mutableListOf()
+
+    var content: String = ""
 }

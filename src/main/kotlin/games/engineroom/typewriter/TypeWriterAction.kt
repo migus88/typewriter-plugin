@@ -55,6 +55,106 @@ private val CLOSE_TO_OPEN = OPEN_TO_CLOSE.entries.associate { (k, v) -> v to k }
 /** Default pause between typing a snippet abbreviation and pressing Tab to expand it. */
 private const val SNIP_DEFAULT_DELAY_MS: Long = 200L
 
+/**
+ * Built-in macro names. A custom macro can't shadow these — the validator refuses such names,
+ * and the expander treats a body matching one of them as a built-in regardless of whether a
+ * custom macro of the same name was somehow persisted (e.g. by hand-editing typewriter.xml).
+ */
+val BUILT_IN_MACRO_NAMES: Set<String> = setOf(
+    "pause", "reformat", "caret", "carret", "import",
+    "backspace", "backspace-hold", "goto", "snip", "key", "complete",
+)
+
+/**
+ * Pre-process [text] by substituting `{{name}}` (or `{{name:arg1:arg2}}`) references with the
+ * matching custom macro's content. Inside the content, parameter references of the form
+ * `$paramName$` are replaced with the corresponding positional argument; missing args resolve to
+ * the empty string, extra args are ignored.
+ *
+ * Recursive — a custom macro's content may itself reference custom or built-in macros. Cycles
+ * are broken by tracking the in-flight name set: a macro can't reappear inside its own
+ * expansion. [maxDepth] is a hard depth cap for pathologically deep chains.
+ *
+ * Bodies whose name (the part before the first `:`) matches a built-in are skipped — those go
+ * through the regular typing pipeline. Anything else with no matching custom macro is left
+ * intact for the pipeline's regex to ignore.
+ */
+fun expandCustomMacros(
+    text: String,
+    customMacros: List<CustomMacroData>,
+    openingSequence: String,
+    closingSequence: String,
+    maxDepth: Int = 16,
+): String {
+    if (customMacros.isEmpty()) return text
+    val byName = customMacros.associateBy { it.name }
+    return expandRecursive(text, byName, openingSequence, closingSequence, emptySet(), maxDepth)
+}
+
+private fun expandRecursive(
+    text: String,
+    byName: Map<String, CustomMacroData>,
+    openingSequence: String,
+    closingSequence: String,
+    visiting: Set<String>,
+    maxDepth: Int,
+): String {
+    if (visiting.size >= maxDepth) return text
+    val regex = """${Regex.escape(openingSequence)}(.*?)${Regex.escape(closingSequence)}""".toRegex()
+    val sb = StringBuilder()
+    var lastEnd = 0
+    var changed = false
+    for (m in regex.findAll(text)) {
+        sb.append(text, lastEnd, m.range.first)
+        val body = m.groupValues[1]
+        val firstColon = body.indexOf(':')
+        val callName = if (firstColon < 0) body else body.substring(0, firstColon)
+        val callArgs: List<String> = if (firstColon < 0) emptyList()
+            else body.substring(firstColon + 1).split(':')
+        val def = byName[callName]
+        val expansion = if (callName !in BUILT_IN_MACRO_NAMES && def != null && callName !in visiting) {
+            substituteMacroParams(def.content, def.parameters, callArgs)
+        } else null
+        if (expansion != null) {
+            sb.append(
+                expandRecursive(
+                    expansion,
+                    byName,
+                    openingSequence,
+                    closingSequence,
+                    visiting + callName,
+                    maxDepth,
+                )
+            )
+            changed = true
+        } else {
+            sb.append(m.value)
+        }
+        lastEnd = m.range.last + 1
+    }
+    sb.append(text, lastEnd, text.length)
+    return if (changed) sb.toString() else text
+}
+
+/**
+ * Replace each `$paramName$` in [content] with the corresponding positional argument. Unknown
+ * `$word$` sequences are left as-is so they don't interfere with typed `$` characters in
+ * scripts that don't use parameter substitution. Single-pass over the content, so a substituted
+ * value can't be re-substituted (avoids surprises when an arg literally contains a parameter
+ * placeholder).
+ */
+private fun substituteMacroParams(
+    content: String,
+    paramNames: List<String>,
+    args: List<String>,
+): String {
+    if (paramNames.isEmpty()) return content
+    val byName = paramNames.withIndex().associate { (i, name) -> name to (args.getOrElse(i) { "" }) }
+    return Regex("""\$(\w+)\$""").replace(content) { match ->
+        byName[match.groupValues[1]] ?: match.value
+    }
+}
+
 private sealed class Classification {
     data class AutoPair(
         val open: Char,
@@ -80,8 +180,11 @@ fun executeTyping(
     completionDelay: Long,
     preExecutionPause: Long,
     scheduler: TypewriterExecutorService,
+    customMacros: List<CustomMacroData> = emptyList(),
     onDone: () -> Unit,
 ) {
+    @Suppress("NAME_SHADOWING")
+    val text = expandCustomMacros(text, customMacros, openingSequence, closingSequence)
     val templateRegex = """${Regex.escape(openingSequence)}(.*?)${Regex.escape(closingSequence)}""".toRegex()
 
     // Build a "code only" view (template markers stripped) for bracket-matching.
