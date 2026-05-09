@@ -22,14 +22,20 @@ import kotlin.random.Random
  *
  * If either lookup fails, the command silently no-ops (after the post-pause).
  *
- * Stepping rule (recomputed every tick from the live caret offset, so line-shorter-than-target
- * column drift converges):
- * 1. If `currentLine < targetLine` → press Down.
- * 2. If `currentLine > targetLine` → press Up.
- * 3. Otherwise, if `currentCol < targetCol` → press Right; if `>` → press Left.
+ * Stepping rule (recomputed every tick from the live caret offset, so column drift across short
+ * lines converges):
+ * 1. `currentLine < targetLine` → press Down.
+ * 2. `currentLine > targetLine` → press Up.
+ * 3. Same line, `currentCol < targetCol` → **Alt+Right** (word-skip) when the next word boundary
+ *    on the line lands at-or-before the target; otherwise plain Right.
+ * 4. Same line, `currentCol > targetCol` → **Alt+Left** (word-skip backward) when the previous
+ *    word boundary lands at-or-after the target; otherwise plain Left.
  *
- * Step pacing reuses the typewriter's [stepDelay] + [jitter] so navigation feels like the same
- * hand that's typing the script.
+ * Word-skip jumps go through `Caret.moveToOffset` rather than the IDE's word-navigation actions
+ * so the landing point is fully predictable — we don't have to detect overshoot from the IDE's
+ * own boundary heuristics. The boundary predictor below approximates the common alt+arrow
+ * behaviour: skip a run of non-word chars, then a run of word chars (or vice versa). It's bounded
+ * to the current logical line so word-skip can't accidentally cross into another line.
  */
 class GotoCommand(
     private val target: String,
@@ -65,9 +71,11 @@ class GotoCommand(
         val targetOffset = targetIdx + target.length
         val targetLine = document.getLineNumber(targetOffset)
         val targetCol = targetOffset - document.getLineStartOffset(targetLine)
+        val targetLineStart = document.getLineStartOffset(targetLine)
+        val targetLineEnd = document.getLineEndOffset(targetLine)
 
-        // Safety cap so a logic bug can't burn an unbounded amount of typing time. The legitimate
-        // upper bound is ~document length keystrokes (one step per character in the worst case).
+        // Safety cap so a logic bug can't burn unbounded typing time. Word-skip pushes the
+        // realistic step count well below this; the bound is just a backstop.
         var budget = (document.textLength + 64).coerceAtLeast(64)
         while (budget-- > 0) {
             val currentOffset = readCaretOffset()
@@ -76,28 +84,45 @@ class GotoCommand(
             val currentLine = document.getLineNumber(currentOffset)
             val currentCol = currentOffset - document.getLineStartOffset(currentLine)
 
-            val dir = when {
-                currentLine < targetLine -> CaretDirection.DOWN
-                currentLine > targetLine -> CaretDirection.UP
-                currentCol < targetCol -> CaretDirection.RIGHT
-                else -> CaretDirection.LEFT
+            val action: StepAction = when {
+                currentLine < targetLine -> StepAction.SingleDown
+                currentLine > targetLine -> StepAction.SingleUp
+                currentCol < targetCol -> {
+                    val nextStop = nextWordStopForward(text, currentOffset, targetLineEnd)
+                    if (nextStop > currentOffset && nextStop <= targetOffset) StepAction.JumpTo(nextStop)
+                    else StepAction.SingleRight
+                }
+                else -> {
+                    val prevStop = prevWordStopBackward(text, currentOffset, targetLineStart)
+                    if (prevStop < currentOffset && prevStop >= targetOffset) StepAction.JumpTo(prevStop)
+                    else StepAction.SingleLeft
+                }
             }
 
             KeyboardSoundService.get().playKey()
-            stepCaret(dir)
+            applyStep(action)
             Thread.sleep(stepPause())
         }
         Thread.sleep(pauseAfter.toLong())
     }
 
-    private fun stepCaret(direction: CaretDirection) {
+    private sealed class StepAction {
+        object SingleUp : StepAction()
+        object SingleDown : StepAction()
+        object SingleLeft : StepAction()
+        object SingleRight : StepAction()
+        data class JumpTo(val offset: Int) : StepAction()
+    }
+
+    private fun applyStep(action: StepAction) {
         ApplicationManager.getApplication().invokeAndWait {
             val caret = editor.caretModel.primaryCaret
-            when (direction) {
-                CaretDirection.UP -> caret.moveCaretRelatively(0, -1, false, false)
-                CaretDirection.DOWN -> caret.moveCaretRelatively(0, 1, false, false)
-                CaretDirection.LEFT -> caret.moveCaretRelatively(-1, 0, false, false)
-                CaretDirection.RIGHT -> caret.moveCaretRelatively(1, 0, false, false)
+            when (action) {
+                StepAction.SingleUp -> caret.moveCaretRelatively(0, -1, false, false)
+                StepAction.SingleDown -> caret.moveCaretRelatively(0, 1, false, false)
+                StepAction.SingleLeft -> caret.moveCaretRelatively(-1, 0, false, false)
+                StepAction.SingleRight -> caret.moveCaretRelatively(1, 0, false, false)
+                is StepAction.JumpTo -> caret.moveToOffset(action.offset)
             }
             editor.scrollingModel.scrollToCaret(ScrollType.RELATIVE)
         }
@@ -115,5 +140,30 @@ class GotoCommand(
         if (jitter <= 0) return stepDelay.coerceAtLeast(0L)
         val v = stepDelay + Random.nextInt(-jitter, jitter + 1)
         return v.coerceAtLeast(0L)
+    }
+
+    private fun isWordChar(c: Char): Boolean = c.isLetterOrDigit() || c == '_'
+
+    /**
+     * Approximate alt+Right landing point on the current line: skip a run of non-word characters,
+     * then a run of word characters. Capped at [lineEnd] so word-skip can't cross into the next
+     * line.
+     */
+    private fun nextWordStopForward(text: CharSequence, from: Int, lineEnd: Int): Int {
+        var i = from
+        while (i < lineEnd && !isWordChar(text[i])) i++
+        while (i < lineEnd && isWordChar(text[i])) i++
+        return i
+    }
+
+    /**
+     * Approximate alt+Left landing point on the current line: skip a run of non-word characters
+     * to the left, then a run of word characters. Capped at [lineStart].
+     */
+    private fun prevWordStopBackward(text: CharSequence, from: Int, lineStart: Int): Int {
+        var i = from
+        while (i > lineStart && !isWordChar(text[i - 1])) i--
+        while (i > lineStart && isWordChar(text[i - 1])) i--
+        return i
     }
 }

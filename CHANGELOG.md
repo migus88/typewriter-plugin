@@ -9,8 +9,8 @@
 ### Added
 
 - `{{backspace:N}}` macro — N individual Backspace presses through the IDE's backspace action handler (so language smart-backspace fires), each with a click sound + jittered pause.
-- `{{backspace-hold:N}}` macro — press-and-hold imitation: deletes N characters in a single document mutation with one sound and one pause.
-- `{{goto:String}}` and `{{goto:Target:Anchor}}` macros — walk the caret (arrow-key steps with a click sound + typing-pace pause per press) from offset 0 to right after the matched string. The two-arg form locates `Anchor` first and then searches for `Target` after it, so a generic target can be disambiguated.
+- `{{backspace-hold:N}}` macro — press-and-hold imitation: characters disappear one at a time at typing pace, but only one click sound plays (at the start) — modelling a held key rather than N tapped presses.
+- `{{goto:String}}` and `{{goto:Target:Anchor}}` macros — walk the caret (arrow-key steps with a click sound + typing-pace pause per press) from offset 0 to right after the matched string. Horizontal travel uses Alt+Arrow word-skip jumps when the next word boundary doesn't overshoot the target, falling back to single-char arrows for the final approach. The two-arg form locates `Anchor` first and then searches for `Target` after it, so a generic target can be disambiguated.
 
 ## 0.6.1
 

@@ -46,8 +46,8 @@ Macros are inline directives wrapped in configurable markers (default `{{` and `
 | `{{import:300:UnityEngine.Color}}` | Same explicit form with a 300 ms delay before the insertion. |
 | `{{caret:up:3}}` | Move the caret 3 steps in the chosen direction (`up`, `down`, `left`, `right`) at typewriter pace — one tick per step. |
 | `{{backspace:5}}` | Press Backspace 5 times. Each press routes through the IDE's backspace action (so smart-backspace fires) with one click sound + jittered pause per press. |
-| `{{backspace-hold:5}}` | Imitates press-and-hold: deletes 5 characters in a single document mutation, one click sound, one pause. |
-| `{{goto:private static}}` | Walks the caret (arrow-key steps, click sound + typing-pace pause per step) from offset 0 forward until it lands right after the first occurrence of `private static`. Not a teleport — the viewer sees the caret crawl. |
+| `{{backspace-hold:5}}` | Imitates press-and-hold: 5 characters disappear one at a time at typing pace, but only one click sound is played (at the start) — modelling a held key, not 5 tapped presses. |
+| `{{goto:private static}}` | Walks the caret (arrow-key steps, click sound + typing-pace pause per step) from offset 0 forward until it lands right after the first occurrence of `private static`. Not a teleport — the viewer sees the caret crawl. Horizontal travel uses Alt+Arrow (word-skip) jumps when the next word boundary doesn't overshoot the target, falling back to single-char arrows for the final approach. |
 | `{{goto:private static:private static class}}` | Same as above, but disambiguates: searches the document for `private static class` first and then for `private static` *after* that anchor — so a generic target string lands on the occurrence you actually meant. Splitting is on the first colon, so neither part may contain `:`. |
 
 The marker tokens (default `{{` / `}}`) are configurable in **Settings** and update live in the macro list and the macro highlighter.

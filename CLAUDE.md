@@ -141,9 +141,9 @@ Templates are inline directives in the source text, wrapped in the configured op
 Two macros, two routing rules:
 
 - `{{backspace:N}}` parses to **N** copies of `BackspaceCommand`, each going through `IdeActions.ACTION_EDITOR_BACKSPACE` so language smart-backspace fires (Python dedent, Rider whitespace fixups, etc.). One click sound + jittered pause per press — paced like real-user typing.
-- `{{backspace-hold:N}}` parses to **one** `BackspaceHoldCommand` that calls `Document.deleteString(end - N, end)` inside a `WriteCommandAction`. One sound, one mutation, one pause — imitates press-and-hold. Bypasses the action handler (no per-step language work).
+- `{{backspace-hold:N}}` parses to **one** `BackspaceHoldCommand` that loops N per-character `Document.deleteString(end - 1, end)` calls (each inside its own `WriteCommandAction`) at the typewriter's pace, but plays **one** click sound at the start — modelling a single held key rather than N tapped presses. Bypasses the action handler so language smart-backspace doesn't fire mid-burst.
 
-`BackspaceHoldCommand` clamps the start offset to 0 so a too-large `N` just deletes everything before the caret instead of throwing. Both commands set `indentOwnedByIde = false` since they explicitly mutate the document/caret.
+`BackspaceHoldCommand` stops early if the caret reaches offset 0 before N chars have been removed. Both commands set `indentOwnedByIde = false` since they explicitly mutate the document/caret.
 
 ### `{{goto:TARGET}}` and `{{goto:TARGET:ANCHOR}}` — caret walk to a string
 
@@ -156,8 +156,10 @@ Search rule:
 Stepping rule (recomputed each tick from the live caret offset):
 1. `currentLine < targetLine` → press Down.
 2. `currentLine > targetLine` → press Up.
-3. Same line, `currentCol < targetCol` → Right.
-4. Same line, `currentCol > targetCol` → Left.
+3. Same line, `currentCol < targetCol` → **Alt+Right** (word-skip) when the next word boundary on the current line lands at-or-before the target; otherwise plain Right.
+4. Same line, `currentCol > targetCol` → **Alt+Left** when the previous word boundary lands at-or-after the target; otherwise plain Left.
+
+Word-skip jumps go through `Caret.moveToOffset(predictedBoundary)` rather than the IDE's word-navigation actions, so the landing point is fully predictable — we don't have to detect overshoot from the IDE's own boundary heuristics. The boundary predictor approximates common alt+arrow behaviour: skip a run of non-word chars, then a run of word chars (where "word" = `Char.isLetterOrDigit() || c == '_'`). Movement is bounded to the current logical line so word-skip can't accidentally cross into another line.
 
 Each step plays a click sound and uses the typewriter's `delay` + `jitter` for pacing — so the caret crawl feels like the same hand that's typing the script. The loop has a `(documentLength + 64)`-step safety budget so a logic bug can't burn unbounded time. By construction, `targetCol ≤ targetLine.length` (the offset comes from a substring match within the document), so convergence is well-defined and the budget should never be exhausted in practice.
 

@@ -291,12 +291,19 @@ fun executeTyping(
                     }
                 }
             }
-            // Press-and-hold backspace: one document mutation, one click sound, one pause.
+            // Press-and-hold backspace: characters disappear at typing pace (one per tick), but
+            // only one click sound at the start — modelling a held key, not N tapped presses.
             "backspace-hold" -> {
                 val n = rest.trim().toIntOrNull() ?: 0
                 if (n > 0) {
                     indentOwnedByIde = false
-                    commands += BackspaceHoldCommand(n, pause(), editor)
+                    commands += BackspaceHoldCommand(
+                        count = n,
+                        stepDelay = delay,
+                        jitter = jitter,
+                        editor = editor,
+                        pauseAfter = pause(),
+                    )
                 }
             }
             // Walk the caret (arrow-key steps, sound per press) to right after `target`. Optional
