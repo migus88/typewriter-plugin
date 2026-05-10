@@ -118,14 +118,6 @@ class TypeWriterDialog(private val project: Project) :
         toolTipText = message("dialog.settings.tooltip")
         addActionListener { openSettingsDialog() }
     }
-    private val enrichButton: JButton = JButton(message("dialog.enrich")).apply {
-        toolTipText = message("dialog.enrich.tooltip")
-        addActionListener { openEnrichDialog() }
-    }
-    private val clearMacrosButton: JButton = JButton(message("dialog.clear.macros")).apply {
-        toolTipText = message("dialog.clear.macros.tooltip")
-        addActionListener { clearMacrosInActiveTab() }
-    }
     private val customMacrosButton: JButton = JButton(message("dialog.custom.macros")).apply {
         toolTipText = message("dialog.custom.macros.tooltip")
         addActionListener { openCustomMacrosDialog() }
@@ -138,37 +130,27 @@ class TypeWriterDialog(private val project: Project) :
     private val macroListModel: javax.swing.DefaultListModel<MacroEntry> =
         javax.swing.DefaultListModel<MacroEntry>().also { rebuildMacroEntries(it) }
 
-    private val macroList: JBList<MacroEntry> =
-        object : JBList<MacroEntry>(macroListModel) {
-            override fun getToolTipText(event: MouseEvent): String? {
-                val idx = locationToIndex(event.point)
-                if (idx < 0) return null
-                val cellBounds = getCellBounds(idx, idx) ?: return null
-                if (!cellBounds.contains(event.point)) return null
-                return model.getElementAt(idx).tooltip()
+    // The renderer surfaces each macro's description directly inside the cell, so a hover
+    // tooltip would just duplicate it (and pop out of bounds for long descriptions). Rely on
+    // the inline rendering instead — no per-cell tooltip.
+    private val macroList: JBList<MacroEntry> = JBList(macroListModel).apply {
+        selectionMode = ListSelectionModel.SINGLE_SELECTION
+        cellRenderer = makeMacroRenderer()
+        addMouseListener(object : MouseAdapter() {
+            override fun mouseClicked(e: MouseEvent) {
+                if (e.clickCount == 2 && SwingUtilities.isLeftMouseButton(e)) {
+                    selectedValue?.let { insertMacro(it) }
+                }
             }
-        }.apply {
-            selectionMode = ListSelectionModel.SINGLE_SELECTION
-            cellRenderer = makeMacroRenderer()
-            // Without an explicit non-null tooltip text, getToolTipText(MouseEvent) is never
-            // consulted — Swing only invokes the per-event override when the component is already
-            // tooltip-enabled.
-            toolTipText = ""
-            addMouseListener(object : MouseAdapter() {
-                override fun mouseClicked(e: MouseEvent) {
-                    if (e.clickCount == 2 && SwingUtilities.isLeftMouseButton(e)) {
-                        selectedValue?.let { insertMacro(it) }
-                    }
+        })
+        addKeyListener(object : KeyAdapter() {
+            override fun keyPressed(e: KeyEvent) {
+                if (e.keyCode == KeyEvent.VK_ENTER) {
+                    selectedValue?.let { insertMacro(it) }
                 }
-            })
-            addKeyListener(object : KeyAdapter() {
-                override fun keyPressed(e: KeyEvent) {
-                    if (e.keyCode == KeyEvent.VK_ENTER) {
-                        selectedValue?.let { insertMacro(it) }
-                    }
-                }
-            })
-        }
+            }
+        })
+    }
 
     private fun rebuildMacroEntries(model: javax.swing.DefaultListModel<MacroEntry>) {
         model.clear()
@@ -178,6 +160,19 @@ class TypeWriterDialog(private val project: Project) :
         }
     }
 
+    // Enrich + Clear macros are surfaced as DialogWrapperActions (rather than standalone JButtons)
+    // so they render with the same visual treatment as Start — same height, padding, and rounded
+    // shape — without picking up the default-action accent fill that's reserved for Start.
+    private val enrichAction: Action = object : DialogWrapperAction(message("dialog.enrich")) {
+        override fun doAction(e: ActionEvent) {
+            openEnrichDialog()
+        }
+    }
+    private val clearMacrosAction: Action = object : DialogWrapperAction(message("dialog.clear.macros")) {
+        override fun doAction(e: ActionEvent) {
+            clearMacrosInActiveTab()
+        }
+    }
     private val startStopAction: Action = object : DialogWrapperAction(message("dialog.start")) {
         init {
             putValue(DEFAULT_ACTION, true)
@@ -288,8 +283,11 @@ class TypeWriterDialog(private val project: Project) :
         )
 
     private fun renameTab(state: TabState) {
+        // Use the parent-component overload (not the project one) so the popup centers on the
+        // typewriter dialog rather than on the IDE frame — matches how SettingsDialog and
+        // CustomMacrosDialog place themselves over the parent window.
         val newName = Messages.showInputDialog(
-            project,
+            dialogPanel,
             message("dialog.rename.tab.prompt"),
             message("dialog.rename.tab.title"),
             null,
@@ -413,17 +411,15 @@ class TypeWriterDialog(private val project: Project) :
             border = JBUI.Borders.customLine(com.intellij.ui.JBColor.border(), 1)
             viewport.background = macroList.background
         }
-        // Match the row buttons' height to the tab strip's natural height so the column header
-        // and footer line up vertically with the tabs across the splitter.
+        // Match the footer button's height to the tab strip's natural height so the column footer
+        // lines up vertically with the tabs across the splitter.
         val tabH = JBUI.scale(30)
-        listOf(enrichButton, clearMacrosButton, customMacrosButton).forEach {
-            it.preferredSize = Dimension(it.preferredSize.width, tabH)
-            it.margin = JBUI.insets(0, 12)
-        }
-        // The "Edit" button sits at the bottom of the macro column — it edits the user's custom
-        // macros, which appear at the bottom of the list. Putting the action close to the things
-        // it acts on keeps the spatial mapping obvious.
-        val macroFooter = JPanel(FlowLayout(FlowLayout.LEFT, JBUI.scale(4), 0)).apply {
+        customMacrosButton.preferredSize = Dimension(customMacrosButton.preferredSize.width, tabH)
+        customMacrosButton.margin = JBUI.insets(0, 12)
+        // "Edit" sits at the bottom-right of the macro column — it edits the custom macros (which
+        // appear at the bottom of the list). Right-aligned so it doesn't read like the start of
+        // a row of controls.
+        val macroFooter = JPanel(FlowLayout(FlowLayout.RIGHT, JBUI.scale(4), 0)).apply {
             add(customMacrosButton)
         }
         val macroColumn = JPanel(BorderLayout(0, 0)).apply {
@@ -479,20 +475,9 @@ class TypeWriterDialog(private val project: Project) :
         // checkbox baseline with the Start button without piling on extra padding. Equal left/
         // right insets match the default south panel's natural horizontal margin.
         keepOpenCheckBox.border = JBUI.Borders.emptyLeft(12)
-        // Enrich + Clear macros sit immediately to the left of the Start button — they're
-        // pre-typing transforms on the active tab, so visually they belong on the action bar.
-        // FlowLayout.RIGHT inside the BorderLayout.CENTER pushes them up against the EAST cell
-        // (which holds the Start button), so they appear right next to it regardless of window
-        // width.
-        val extras = JPanel(FlowLayout(FlowLayout.RIGHT, JBUI.scale(4), 0)).apply {
-            isOpaque = false
-            add(enrichButton)
-            add(clearMacrosButton)
-        }
         return JPanel(BorderLayout()).apply {
             add(keepOpenCheckBox, BorderLayout.WEST)
-            add(extras, BorderLayout.CENTER)
-            add(defaultSouth, BorderLayout.EAST)
+            add(defaultSouth, BorderLayout.CENTER)
         }
     }
 
@@ -743,7 +728,6 @@ class TypeWriterDialog(private val project: Project) :
 
     private sealed class MacroEntry {
         abstract fun render(open: String, close: String): String
-        abstract fun tooltip(): String?
         abstract fun placeholder(): String?
         /**
          * Short description shown directly under the macro syntax in the list cell. May contain
@@ -755,7 +739,6 @@ class TypeWriterDialog(private val project: Project) :
         class BuiltIn(val kind: MacroKind) : MacroEntry() {
             override fun render(open: String, close: String): String =
                 kind.pattern.replace("{O}", open).replace("{C}", close)
-            override fun tooltip(): String = message(kind.descriptionKey)
             override fun placeholder(): String? = kind.placeholder
             override fun description(): String = message(kind.descriptionKey)
         }
@@ -775,9 +758,6 @@ class TypeWriterDialog(private val project: Project) :
                 if (parameters.isEmpty()) return "$open$name$close"
                 return "$open$name:${parameters.joinToString(":")}$close"
             }
-            override fun tooltip(): String = descriptionText.ifBlank {
-                TypeWriterBundle.message("macro.custom.description")
-            }
             // The first parameter doubles as the placeholder so a selection-replace insert
             // (insertMacro) drops the highlighted token into the first positional argument slot,
             // matching how built-in placeholders like `Word`/`Namespace` behave.
@@ -786,7 +766,8 @@ class TypeWriterDialog(private val project: Project) :
         }
     }
 
-    override fun createActions(): Array<Action> = arrayOf(startStopAction)
+    override fun createActions(): Array<Action> =
+        arrayOf(enrichAction, clearMacrosAction, startStopAction)
 
     override fun getPreferredFocusedComponent(): JComponent = tabsState[activeTabIndex].editorField
 
@@ -906,6 +887,11 @@ class TypeWriterDialog(private val project: Project) :
         }
         walk(dialogPanel)
         for (state in tabsState) state.editorField.setViewer(!enabled)
+        // Enrich + Clear macros live in the south panel as DialogWrapperActions, not in the
+        // dialogPanel tree — so the walk above doesn't reach them. Toggle their Action.enabled
+        // explicitly; DialogWrapper mirrors that to the rendered button's enabled state.
+        enrichAction.isEnabled = enabled
+        clearMacrosAction.isEnabled = enabled
         // The single bottom button serves as both Start (when idle) and Stop (when running).
         // Keep it enabled in both states; just toggle the label.
         startStopAction.putValue(
