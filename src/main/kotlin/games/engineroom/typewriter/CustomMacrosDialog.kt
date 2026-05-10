@@ -55,10 +55,11 @@ class CustomMacrosDialog(
         var name: String,
         var parameters: MutableList<String>,
         var content: String,
+        var description: String,
     )
 
     private val working: MutableList<Working> = settings.customMacros
-        .map { Working(it.name, it.parameters.toMutableList(), it.content) }
+        .map { Working(it.name, it.parameters.toMutableList(), it.content, it.description) }
         .toMutableList()
 
     private val listModel: DefaultListModel<Working> = DefaultListModel<Working>().apply {
@@ -76,6 +77,10 @@ class CustomMacrosDialog(
     private val paramsField: JBTextField = JBTextField().apply {
         emptyText.text = message("custom.macros.parameters.placeholder")
         toolTipText = message("custom.macros.parameters.tooltip")
+    }
+    private val descriptionField: JBTextField = JBTextField().apply {
+        emptyText.text = message("custom.macros.description.placeholder")
+        toolTipText = message("custom.macros.description.tooltip")
     }
     private val contentField: EditorTextField = createContentEditor()
 
@@ -107,6 +112,11 @@ class CustomMacrosDialog(
             override fun insertUpdate(e: DocumentEvent) = pushParamsToModel()
             override fun removeUpdate(e: DocumentEvent) = pushParamsToModel()
             override fun changedUpdate(e: DocumentEvent) = pushParamsToModel()
+        })
+        descriptionField.document.addDocumentListener(object : DocumentListener {
+            override fun insertUpdate(e: DocumentEvent) = pushDescriptionToModel()
+            override fun removeUpdate(e: DocumentEvent) = pushDescriptionToModel()
+            override fun changedUpdate(e: DocumentEvent) = pushDescriptionToModel()
         })
         contentField.document.addDocumentListener(
             object : com.intellij.openapi.editor.event.DocumentListener {
@@ -172,7 +182,7 @@ class CustomMacrosDialog(
 
         // Two-column GridBag-ish layout via BoxLayout: stacked rows, each row is a labelled
         // field. Keeps the form compact and aligns the labels' baselines with the inputs.
-        val labelWidth = JLabel(message("custom.macros.parameters.label")).preferredSize.width + JBUI.scale(8)
+        val labelWidth = JLabel(message("custom.macros.description.label")).preferredSize.width + JBUI.scale(8)
         fun labelled(text: String, field: JComponent): JPanel = JPanel(BorderLayout(JBUI.scale(8), 0)).apply {
             isOpaque = false
             val label = JLabel(text)
@@ -182,6 +192,7 @@ class CustomMacrosDialog(
         }
         val nameRow = labelled(message("custom.macros.name.label"), nameField)
         val paramsRow = labelled(message("custom.macros.parameters.label"), paramsField)
+        val descriptionRow = labelled(message("custom.macros.description.label"), descriptionField)
 
         val formRows = JPanel().apply {
             isOpaque = false
@@ -189,6 +200,8 @@ class CustomMacrosDialog(
             add(nameRow)
             add(javax.swing.Box.createVerticalStrut(JBUI.scale(4)))
             add(paramsRow)
+            add(javax.swing.Box.createVerticalStrut(JBUI.scale(4)))
+            add(descriptionRow)
         }
         val rightHeader = JPanel(BorderLayout(0, JBUI.scale(4))).apply {
             add(formRows, BorderLayout.NORTH)
@@ -245,6 +258,7 @@ class CustomMacrosDialog(
                 val w = working[idx]
                 nameField.text = w.name
                 paramsField.text = w.parameters.joinToString(", ")
+                descriptionField.text = w.description
                 contentField.text = w.content
             }
         } finally {
@@ -256,6 +270,7 @@ class CustomMacrosDialog(
     private fun clearFields() {
         nameField.text = ""
         paramsField.text = ""
+        descriptionField.text = ""
         contentField.text = ""
     }
 
@@ -263,6 +278,7 @@ class CustomMacrosDialog(
         val hasSelection = macroList.selectedIndex in 0 until working.size
         nameField.isEnabled = hasSelection
         paramsField.isEnabled = hasSelection
+        descriptionField.isEnabled = hasSelection
         contentField.isEnabled = hasSelection
         deleteButton.isEnabled = hasSelection
     }
@@ -283,6 +299,13 @@ class CustomMacrosDialog(
         listModel.set(idx, working[idx])
     }
 
+    private fun pushDescriptionToModel() {
+        if (suppressFieldListeners) return
+        val idx = macroList.selectedIndex
+        if (idx < 0 || idx >= working.size) return
+        working[idx].description = descriptionField.text
+    }
+
     private fun pushContentToModel() {
         if (suppressFieldListeners) return
         val idx = macroList.selectedIndex
@@ -291,7 +314,7 @@ class CustomMacrosDialog(
     }
 
     private fun addEntry() {
-        val newEntry = Working(suggestNewName(), mutableListOf(), "")
+        val newEntry = Working(suggestNewName(), mutableListOf(), "", "")
         working += newEntry
         listModel.addElement(newEntry)
         val newIdx = working.size - 1
@@ -382,6 +405,7 @@ class CustomMacrosDialog(
                     name = w.name
                     parameters = w.parameters.toMutableList()
                     content = w.content
+                    description = w.description.trim()
                 }
             }
             .toMutableList()

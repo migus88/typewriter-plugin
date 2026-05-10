@@ -174,7 +174,7 @@ class TypeWriterDialog(private val project: Project) :
         model.clear()
         for (kind in MacroKind.entries) model.addElement(MacroEntry.BuiltIn(kind))
         for (data in settings.customMacros) {
-            model.addElement(MacroEntry.Custom(data.name, data.parameters.toList(), ""))
+            model.addElement(MacroEntry.Custom(data.name, data.parameters.toList(), data.description))
         }
     }
 

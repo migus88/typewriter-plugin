@@ -117,4 +117,12 @@ class CustomMacroData {
     var parameters: MutableList<String> = mutableListOf()
 
     var content: String = ""
+
+    /**
+     * Short description shown under the macro syntax in the dialog's macro list. Optional —
+     * macros without one fall back to a generic "Custom user-defined macro" tooltip. Plain text;
+     * the renderer escapes any HTML-special characters before display.
+     */
+    @get:Attribute("description")
+    var description: String = ""
 }
