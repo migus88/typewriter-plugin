@@ -16,9 +16,13 @@ The user-facing description of this plugin lives in [`README.md`](README.md). Th
 
 If a change is purely internal (refactor, rewording in code comments, test-only) and the README's user-facing copy is unchanged by it, you can skip the README edit — but say so explicitly when reporting the change. Default to "yes, update the README" when in doubt.
 
+## Bumping the version on every commit
+
+Every commit must bump the patch component of `pluginVersion` in [`gradle.properties`](gradle.properties) — i.e. the `X` in `0.0.X`. Increment by one (`0.9.0` → `0.9.1` → `0.9.2`, …) regardless of whether the change is a feature, fix, or pure refactor. Do this as part of the same commit, not as a follow-up. Minor/major bumps (`0.9.x` → `0.10.0`) are reserved for the user to call out explicitly.
+
 ## Project
 
-JetBrains IDE plugin (IntelliJ Platform) that auto-types text into the editor at a configurable speed — used for screencasts/demos. Supports inline template commands (`{{pause:1000}}`, `{{reformat}}`, `{{complete:N:Word}}`, `{{import:N::K}}`, `{{import:N:Namespace}}`, `{{caret:DIR:N}}`).
+JetBrains IDE plugin (IntelliJ Platform) that auto-types text into the editor at a configurable speed — used for screencasts/demos. Supports inline template commands (`` `{pause:1000}` ``, `` `{reformat}` ``, `` `{complete:N:Word}` ``, `` `{import:N::K}` ``, `` `{import:N:Namespace}` ``, `` `{caret:DIR:N}` ``). Default markers are `` `{ `` / `` }` `` (backtick-wrapped braces, so literal `{`/`}` in the source code don't collide with the template parser).
 
 - Plugin ID: `games.engine-room.typewriter`
 - Kotlin package: `games.engineroom.typewriter`
@@ -67,7 +71,7 @@ So:
 
 `executeTyping` in `TypeWriterAction.kt` is the single entry point. It:
 
-1. Strips template markers (default `{{…}}`) out of the input to produce a **code-only** view, then runs a stack-based bracket matcher over it (`classify`).
+1. Strips template markers (default `` `{…}` ``) out of the input to produce a **code-only** view, then runs a stack-based bracket matcher over it (`classify`).
 2. For every correctly-nested `{}`, `()`, `[]` pair, the matcher classifies each source position:
    - **opener** → `AutoPair` carrying the body's leading and trailing whitespace
    - **leading whitespace** between opener and body → `ConsumeOnly` (the auto-pair sequence already inserts these; the source-walker emits no command for them)
@@ -96,7 +100,7 @@ Caveat: the matcher is naive char-level — it doesn't understand strings or com
 
 ### Template commands
 
-Templates are inline directives in the source text, wrapped in the configured opening/closing markers (default `{{` / `}}`). Parser splits on the *first* colon to get the command name; everything after is the args body, parsed per-command:
+Templates are inline directives in the source text, wrapped in the configured opening/closing markers (default `` `{ `` / `` }` ``). Parser splits on the *first* colon to get the command name; everything after is the args body, parsed per-command:
 
 - `{{pause:N}}` — `PauseCommand(N)` (milliseconds).
 - `{{reformat}}` — `ReformatCommand`.

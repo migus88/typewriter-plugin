@@ -642,6 +642,7 @@ class TypeWriterDialog(private val project: Project) :
     ) {
         PAUSE("{O}pause:1000{C}", "macro.pause.description"),
         REFORMAT("{O}reformat{C}", "macro.reformat.description"),
+        BR("{O}br{C}", "macro.br.description"),
         COMPLETE("{O}complete:3:Word{C}", "macro.complete.description", placeholder = "Word"),
         COMPLETE_DELAY(
             "{O}complete:3:500:Word{C}",

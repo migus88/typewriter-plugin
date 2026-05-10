@@ -18,7 +18,7 @@ Hit <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd> (or <kbd>Ctrl</kbd>+<kbd>Shift<
 - **Tabs.** Keep multiple scripts ready at once. The tab strip is a single row that scrolls horizontally when there are more tabs than fit — a scroll bar appears under the strip rather than collapsing into a dropdown. Click the **+** in the top toolbar to add a tab, double-click a tab to rename, click the **×** on a tab to close it (always visible — no hover-to-reveal). Each tab has its own text and language. Tabs and their contents persist across IDE restarts.
 - **Per-tab language picker.** Switching languages re-spins the underlying `LightVirtualFile` so the highlighter follows along without losing your text.
 - **Non-modal dialog.** Park it on a second screen while typing plays in your code editor. The active editor is captured at "Start" time, not when the action fires, so you can re-focus the IDE first.
-- **Macro syntax highlighting** layers a configurable colour over `{{ … }}` macro spans inside your scripts, with a separate colour for the colon-separated arguments after the macro name. Both colours are live-editable in **Settings**.
+- **Macro syntax highlighting** layers a configurable colour over `` `{ … }` `` macro spans inside your scripts, with a separate colour for the colon-separated arguments after the macro name. Both colours are live-editable in **Settings**.
 - **Keyboard click sounds.** Each typed character plays a sampled keystroke with a touch of pitch jitter; space and enter get their own (louder) samples. Mixed in software through a single always-open audio line so fast typing never starves on macOS.
 
 ## Run modes
@@ -32,43 +32,44 @@ In both modes, focus is moved to the IDE editor at the start of the run so the c
 
 ## Inline macros
 
-Macros are inline directives wrapped in configurable markers (default `{{` and `}}`). The dialog lists them in a panel on the left — double-click (or press <kbd>Enter</kbd>) to insert the syntax at the active tab's caret. If you have a selection, the macro's placeholder (e.g. `Word`, `Namespace`) is replaced by the selected text on insert, so highlighting a token and double-clicking **complete** wraps it directly.
+Macros are inline directives wrapped in configurable markers (default `` `{ `` and `` }` ``). The dialog lists them in a panel on the left — double-click (or press <kbd>Enter</kbd>) to insert the syntax at the active tab's caret. If you have a selection, the macro's placeholder (e.g. `Word`, `Namespace`) is replaced by the selected text on insert, so highlighting a token and double-clicking **complete** wraps it directly.
 
 | Macro | What it does |
 |---|---|
-| `{{pause:1000}}` | Pause typing for 1000 ms. |
-| `{{reformat}}` | Run the IDE's "Reformat Code" action at the caret. |
-| `{{complete:3:Word}}` | Imitates IntelliSense — types `Wor` at typing pace, surfaces the auto-completion popup, waits the global "completion delay", then drops the rest of `Word` in one chunk. |
-| `{{complete:3:500:Word}}` | Same as above, but with a per-template completion delay (500 ms) overriding the global setting. |
-| `{{import:300}}` | Drives the IDE's Alt+Enter intentions popup. Hides any active completion popup, restarts the daemon to bypass ReSharper's debounce, polls until the symbol at the caret is flagged with at least a warning, dispatches Alt+Enter through the IDE's full event pipeline, finds and navigates into Rider's "Import type…" submenu, then waits 300 ms (your reading window) before pressing Enter on the highlighted option. |
-| `{{import:300::3}}` | Same as auto mode, but animates the highlight down to the 3rd option in the submenu — each Down arrow paced like a typed character — before pressing Enter. |
-| `{{import:UnityEngine.Color}}` | Explicit form: bypasses the daemon and popup entirely. Inserts a language-appropriate import line (`using` / `import` / `#include` / `require` / `use`) at the top of the file, after any existing imports. |
-| `{{import:300:UnityEngine.Color}}` | Same explicit form with a 300 ms delay before the insertion. |
-| `{{caret:up:3}}` | Move the caret 3 steps in the chosen direction (`up`, `down`, `left`, `right`) at typewriter pace — one tick per step. |
-| `{{backspace:5}}` | Press Backspace 5 times. Each press routes through the IDE's backspace action (so smart-backspace fires) with one click sound + jittered pause per press. |
-| `{{backspace-hold:5}}` | Imitates press-and-hold: 5 characters disappear one at a time at typing pace, but only one click sound is played (at the start) — modelling a held key, not 5 tapped presses. |
-| `{{goto:private static}}` | Walks the caret (arrow-key steps, click sound + typing-pace pause per step) from offset 0 forward until it lands right after the first occurrence of `private static`. Not a teleport — the viewer sees the caret crawl. Horizontal travel uses Alt+Arrow (word-skip) jumps when the next word boundary doesn't overshoot the target, falling back to single-char arrows for the final approach. |
-| `{{goto:private static:private static class}}` | Same as above, but disambiguates: searches the document for `private static class` first and then for `private static` *after* that anchor — so a generic target string lands on the occurrence you actually meant. Splitting is on the first colon, so neither part may contain `:`. |
-| `{{snip:ctor}}` | Type the live-template abbreviation `ctor` at typing pace, hold for 200 ms so the viewer sees the prefix sitting at the caret, then press Tab to expand the IDE snippet. Works with any registered live template (Rider/ReSharper templates, IntelliJ live templates, language-specific snippets). The Tab keystroke is dispatched through the full IDE event pipeline so whatever expansion handler the language ships with — IntelliJ's, ReSharper's, etc. — picks it up exactly as it would for a real keypress. |
-| `{{snip:ctor:500}}` | Same as above, but with an explicit 500 ms hold before Tab — overrides the 200 ms default. |
-| `{{key:tab}}` | Press Tab once at the caret (with the keyboard click sound). Goes through the IDE's editor-tab action handler — typically inserts a tab/spaces or advances indentation, the same as a real Tab key with no higher-priority keymap binding active. **Does not** trigger snippet expansion (use `{{snip:...}}` for that — it routes through the keymap dispatcher so live-template handlers can win). |
-| `{{key:enter}}` | Press Enter once at the caret (with sound). Goes through the IDE's smart-enter handler, so language-aware behaviors fire (auto-indent, brace splitting, etc.). |
+| `` `{pause:1000}` `` | Pause typing for 1000 ms. |
+| `` `{reformat}` `` | Run the IDE's "Reformat Code" action at the caret. |
+| `` `{br}` `` | Suppress the very next character if it's a line break. Lets you keep a script readable on multiple lines while the animator types the text as one continuous line. No-op when the next character isn't `\n`. |
+| `` `{complete:3:Word}` `` | Imitates IntelliSense — types `Wor` at typing pace, surfaces the auto-completion popup, waits the global "completion delay", then drops the rest of `Word` in one chunk. |
+| `` `{complete:3:500:Word}` `` | Same as above, but with a per-template completion delay (500 ms) overriding the global setting. |
+| `` `{import:300}` `` | Drives the IDE's Alt+Enter intentions popup. Hides any active completion popup, restarts the daemon to bypass ReSharper's debounce, polls until the symbol at the caret is flagged with at least a warning, dispatches Alt+Enter through the IDE's full event pipeline, finds and navigates into Rider's "Import type…" submenu, then waits 300 ms (your reading window) before pressing Enter on the highlighted option. |
+| `` `{import:300::3}` `` | Same as auto mode, but animates the highlight down to the 3rd option in the submenu — each Down arrow paced like a typed character — before pressing Enter. |
+| `` `{import:UnityEngine.Color}` `` | Explicit form: bypasses the daemon and popup entirely. Inserts a language-appropriate import line (`using` / `import` / `#include` / `require` / `use`) at the top of the file, after any existing imports. |
+| `` `{import:300:UnityEngine.Color}` `` | Same explicit form with a 300 ms delay before the insertion. |
+| `` `{caret:up:3}` `` | Move the caret 3 steps in the chosen direction (`up`, `down`, `left`, `right`) at typewriter pace — one tick per step. |
+| `` `{backspace:5}` `` | Press Backspace 5 times. Each press routes through the IDE's backspace action (so smart-backspace fires) with one click sound + jittered pause per press. |
+| `` `{backspace-hold:5}` `` | Imitates press-and-hold: 5 characters disappear one at a time at typing pace, but only one click sound is played (at the start) — modelling a held key, not 5 tapped presses. |
+| `` `{goto:private static}` `` | Walks the caret (arrow-key steps, click sound + typing-pace pause per step) from offset 0 forward until it lands right after the first occurrence of `private static`. Not a teleport — the viewer sees the caret crawl. Horizontal travel uses Alt+Arrow (word-skip) jumps when the next word boundary doesn't overshoot the target, falling back to single-char arrows for the final approach. |
+| `` `{goto:private static:private static class}` `` | Same as above, but disambiguates: searches the document for `private static class` first and then for `private static` *after* that anchor — so a generic target string lands on the occurrence you actually meant. Splitting is on the first colon, so neither part may contain `:`. |
+| `` `{snip:ctor}` `` | Type the live-template abbreviation `ctor` at typing pace, hold for 200 ms so the viewer sees the prefix sitting at the caret, then press Tab to expand the IDE snippet. Works with any registered live template (Rider/ReSharper templates, IntelliJ live templates, language-specific snippets). The Tab keystroke is dispatched through the full IDE event pipeline so whatever expansion handler the language ships with — IntelliJ's, ReSharper's, etc. — picks it up exactly as it would for a real keypress. |
+| `` `{snip:ctor:500}` `` | Same as above, but with an explicit 500 ms hold before Tab — overrides the 200 ms default. |
+| `` `{key:tab}` `` | Press Tab once at the caret (with the keyboard click sound). Goes through the IDE's editor-tab action handler — typically inserts a tab/spaces or advances indentation, the same as a real Tab key with no higher-priority keymap binding active. **Does not** trigger snippet expansion (use `` `{snip:...}` `` for that — it routes through the keymap dispatcher so live-template handlers can win). |
+| `` `{key:enter}` `` | Press Enter once at the caret (with sound). Goes through the IDE's smart-enter handler, so language-aware behaviors fire (auto-indent, brace splitting, etc.). |
 
-The marker tokens (default `{{` / `}}`) are configurable in **Settings** and update live in the macro list and the macro highlighter.
+The marker tokens (default `` `{ `` / `` }` ``) are configurable in **Settings** and update live in the macro list and the macro highlighter.
 
 ## Custom macros
 
-Click **Custom macros…** under the macro list to open a popup that manages your own user-defined macros. Each entry has a **name**, an optional ordered list of **parameters**, and a **content** body — when the script later contains `{{name}}` (or `{{name:arg1:arg2}}` for parameterised macros), it gets substituted with that content before the typing pipeline runs.
+Click **Custom macros…** under the macro list to open a popup that manages your own user-defined macros. Each entry has a **name**, an optional ordered list of **parameters**, and a **content** body — when the script later contains `` `{name}` `` (or `` `{name:arg1:arg2}` `` for parameterised macros), it gets substituted with that content before the typing pipeline runs.
 
-- A custom macro named `prop` becomes `{{prop}}` in your scripts. Custom macros appear at the bottom of the macro list, separated from the built-ins by a divider line and rendered in italic; double-click (or press <kbd>Enter</kbd>) to insert the syntax at the active tab's caret.
-- **Parameters** are positional. Define them as a comma-separated list (e.g. `name, type`) and reference each one in the content as `$name$` (live-template style). Calling `{{prop:foo:int}}` then substitutes `$name$` → `foo`, `$type$` → `int`. Missing arguments resolve to empty strings; extras are ignored. Parameter names must be identifier-like (letters, digits, underscore; must start with a letter or underscore) and unique within a macro. Custom macros without parameters are called as `{{name}}` and skip substitution entirely.
-- Content is plain text and can itself contain other macros — built-in (`{{pause:500}}`, `{{complete:3:Word}}`, …) or other custom names. Expansion is recursive with cycle protection, so a custom macro that references itself (or two macros that reference each other) won't loop forever.
-- The macro **name** can't collide with built-in macros (`pause`, `reformat`, `complete`, `import`, `caret`, `backspace`, `backspace-hold`, `goto`, `snip`, `key`), can't contain whitespace or `:`, and must be unique.
+- A custom macro named `prop` becomes `` `{prop}` `` in your scripts. Custom macros appear at the bottom of the macro list, separated from the built-ins by a divider line and rendered in italic; double-click (or press <kbd>Enter</kbd>) to insert the syntax at the active tab's caret.
+- **Parameters** are positional. Define them as a comma-separated list (e.g. `name, type`) and reference each one in the content as `$name$` (live-template style). Calling `` `{prop:foo:int}` `` then substitutes `$name$` → `foo`, `$type$` → `int`. Missing arguments resolve to empty strings; extras are ignored. Parameter names must be identifier-like (letters, digits, underscore; must start with a letter or underscore) and unique within a macro. Custom macros without parameters are called as `` `{name}` `` and skip substitution entirely.
+- Content is plain text and can itself contain other macros — built-in (`` `{pause:500}` ``, `` `{complete:3:Word}` ``, …) or other custom names. Expansion is recursive with cycle protection, so a custom macro that references itself (or two macros that reference each other) won't loop forever.
+- The macro **name** can't collide with built-in macros (`pause`, `reformat`, `complete`, `import`, `caret`, `backspace`, `backspace-hold`, `goto`, `snip`, `key`, `br`), can't contain whitespace or `:`, and must be unique.
 - Definitions persist across IDE restarts.
 
 ## Enrichment
 
-Click **Enrich…** to wrap matching language keywords in your script with `{{complete}}` macros automatically — useful when you want a screencast to feel like real typing without authoring every completion beat by hand.
+Click **Enrich…** to wrap matching language keywords in your script with `` `{complete}` `` macros automatically — useful when you want a screencast to feel like real typing without authoring every completion beat by hand.
 
 - Built-in keyword presets ship for Kotlin, Java, C#, Python, JavaScript, TypeScript, C++, C, PHP, Ruby, and Go.
 - Add custom keywords per language; tune per-keyword minimum and maximum typed-prefix lengths (the typed prefix is randomised inside that range each run).
@@ -83,14 +84,14 @@ The gear button next to the language picker opens a settings dialog with cross-t
 
 - **Typing delay** (1 – 2000 ms) — base pause between characters.
 - **Jitter** (0 – 2000 ms) — random ± noise applied to each delay so timing isn't robotic.
-- **Macro markers** — opening and closing token pair (default `{{` and `}}`).
-- **Completion delay** — how long the auto-completion popup stays visible inside `{{complete}}`.
+- **Macro markers** — opening and closing token pair (default `` `{ `` and `` }` ``).
+- **Completion delay** — how long the auto-completion popup stays visible inside `` `{complete}` ``.
 - **Pre-execution pause** — added before the first keystroke, so you can hit Start and switch to the editor without losing the opening characters.
 - **Macro colour** and **Argument colour** — separate colours for the macro span and its colon-separated arguments inside the dialog's editors.
 
 ## What it does to your IDE during a run
 
-- **Auto-import suppression.** While typing runs, `CodeInsightSettings.ADD_UNAMBIGIOUS_IMPORTS_ON_THE_FLY` is forced off and restored when the session ends. Without this, Rider's daemon would auto-add `using`s as soon as a symbol resolved uniquely, defeating the `{{import}}` macro.
+- **Auto-import suppression.** While typing runs, `CodeInsightSettings.ADD_UNAMBIGIOUS_IMPORTS_ON_THE_FLY` is forced off and restored when the session ends. Without this, Rider's daemon would auto-add `using`s as soon as a symbol resolved uniquely, defeating the `` `{import}` `` macro.
 - **Native IntelliSense.** Single-character inserts route through the IDE's `TypedAction`, which fires the full TypedHandler chain — so the auto-completion popup behaves exactly like a real user is typing, brackets and quotes auto-pair as you'd expect, and language plugins (Rider's C# typing-assist, ReSharper, etc.) see their normal events.
 - **Structural auto-pairing.** When the planner sees a matched `{}`, `()`, `[]`, or quoted string in the source, it types the opener (the IDE auto-pairs the closer), then lays the body's leading and trailing whitespace down chunk-by-chunk. The closer ends up on its proper line at the moment the opener is typed, keeping the syntax tree balanced and the highlighter and daemon awake throughout.
 - **Indent ownership.** When the IDE auto-indents after a newline, the script's redundant indent characters are silently dropped. Same at the start of a run if the caret is parked on an already-indented blank line — typing the script's leading indent on top would double it.

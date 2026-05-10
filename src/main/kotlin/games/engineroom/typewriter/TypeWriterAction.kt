@@ -62,7 +62,7 @@ private const val SNIP_DEFAULT_DELAY_MS: Long = 200L
  */
 val BUILT_IN_MACRO_NAMES: Set<String> = setOf(
     "pause", "reformat", "caret", "carret", "import",
-    "backspace", "backspace-hold", "goto", "snip", "key", "complete",
+    "backspace", "backspace-hold", "goto", "snip", "key", "complete", "br",
 )
 
 /**
@@ -321,6 +321,19 @@ fun executeTyping(
             // a `\n` followed by `{{pause}}` followed by source indent should still skip the
             // indent (the IDE just auto-indented before the pause).
             "pause" -> commands += PauseCommand(rest.trim().toLongOrNull() ?: 0L)
+            // {{br}} — suppress the very next character if (and only if) it's `\n`. Used to
+            // keep the source script readable on multiple lines while having the animator type
+            // the surrounding text as a single line. No-op when the next char isn't `\n` or
+            // when there is no next char. Only the line break itself is consumed; any indent
+            // that follows is processed normally by the next appendSegment (and gets dropped
+            // by the indentOwnedByIde rule only if a real Enter just preceded — which `{{br}}`
+            // explicitly avoided).
+            "br" -> {
+                val nextSrcIdx = m.range.last + 1
+                if (nextSrcIdx < text.length && text[nextSrcIdx] == '\n') {
+                    consumedAfterTemplate = 1
+                }
+            }
             "reformat" -> {
                 indentOwnedByIde = false
                 commands += ReformatCommand(editor)
