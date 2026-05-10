@@ -128,7 +128,7 @@ class CustomMacrosDialog(
         val document = FileDocumentManager.getInstance().getDocument(virtualFile)
             ?: EditorFactory.getInstance().createDocument("")
         return EditorTextField(document, project, PlainTextFileType.INSTANCE, false, false).apply {
-            preferredSize = Dimension(420, 280)
+            preferredSize = JBUI.size(420, 280)
             addSettingsProvider { editor ->
                 editor.settings.isLineNumbersShown = true
                 editor.settings.isUseSoftWraps = true
@@ -154,26 +154,26 @@ class CustomMacrosDialog(
             javax.swing.ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED,
         ).apply {
             border = JBUI.Borders.customLine(com.intellij.ui.JBColor.border(), 1)
-            preferredSize = Dimension(220, 320)
+            preferredSize = JBUI.size(220, 320)
         }
-        val listButtons = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
+        val listButtons = JPanel(FlowLayout(FlowLayout.LEFT, JBUI.scale(4), 0)).apply {
             isOpaque = false
-            val sq = Dimension(28, 28)
+            val sq = JBUI.size(28, 28)
             addButton.preferredSize = sq
             deleteButton.preferredSize = sq
             add(addButton)
             add(deleteButton)
         }
-        val leftPane = JPanel(BorderLayout(0, 4)).apply {
+        val leftPane = JPanel(BorderLayout(0, JBUI.scale(4))).apply {
             add(listScroll, BorderLayout.CENTER)
             add(listButtons, BorderLayout.SOUTH)
-            preferredSize = Dimension(240, 360)
+            preferredSize = JBUI.size(240, 360)
         }
 
         // Two-column GridBag-ish layout via BoxLayout: stacked rows, each row is a labelled
         // field. Keeps the form compact and aligns the labels' baselines with the inputs.
-        val labelWidth = JLabel(message("custom.macros.parameters.label")).preferredSize.width + 8
-        fun labelled(text: String, field: JComponent): JPanel = JPanel(BorderLayout(8, 0)).apply {
+        val labelWidth = JLabel(message("custom.macros.parameters.label")).preferredSize.width + JBUI.scale(8)
+        fun labelled(text: String, field: JComponent): JPanel = JPanel(BorderLayout(JBUI.scale(8), 0)).apply {
             isOpaque = false
             val label = JLabel(text)
             label.preferredSize = Dimension(labelWidth, label.preferredSize.height)
@@ -187,24 +187,24 @@ class CustomMacrosDialog(
             isOpaque = false
             layout = javax.swing.BoxLayout(this, javax.swing.BoxLayout.Y_AXIS)
             add(nameRow)
-            add(javax.swing.Box.createVerticalStrut(4))
+            add(javax.swing.Box.createVerticalStrut(JBUI.scale(4)))
             add(paramsRow)
         }
-        val rightHeader = JPanel(BorderLayout(0, 4)).apply {
+        val rightHeader = JPanel(BorderLayout(0, JBUI.scale(4))).apply {
             add(formRows, BorderLayout.NORTH)
             add(JLabel(message("custom.macros.content.label")), BorderLayout.SOUTH)
         }
-        val rightPane = JPanel(BorderLayout(0, 4)).apply {
+        val rightPane = JPanel(BorderLayout(0, JBUI.scale(4))).apply {
             add(rightHeader, BorderLayout.NORTH)
             add(contentField, BorderLayout.CENTER)
-            preferredSize = Dimension(440, 360)
+            preferredSize = JBUI.size(440, 360)
         }
 
         return OnePixelSplitter(false, 0.32f).apply {
             firstComponent = leftPane
             secondComponent = rightPane
             setHonorComponentsMinimumSize(true)
-            preferredSize = Dimension(720, 380)
+            preferredSize = JBUI.size(720, 380)
         }
     }
 

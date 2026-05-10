@@ -41,7 +41,6 @@ import java.awt.Container
 import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Font
-import java.awt.Insets
 import java.awt.event.ActionEvent
 import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
@@ -93,13 +92,13 @@ class TypeWriterDialog(private val project: Project) :
         javax.swing.ScrollPaneConstants.HORIZONTAL_SCROLLBAR_ALWAYS,
     ).apply {
         border = JBUI.Borders.empty()
-        horizontalScrollBar.unitIncrement = 30
-        horizontalScrollBar.blockIncrement = 120
+        horizontalScrollBar.unitIncrement = JBUI.scale(30)
+        horizontalScrollBar.blockIncrement = JBUI.scale(120)
         // Pin the strip+scrollbar block to a known total height. NORTH placement asks for the
         // preferred height; without an explicit value the layout slack made the bar visually
         // collide with the labels.
-        preferredSize = Dimension(0, TAB_ROW_HEIGHT + SCROLLBAR_HEIGHT)
-        minimumSize = Dimension(0, TAB_ROW_HEIGHT + SCROLLBAR_HEIGHT)
+        preferredSize = JBUI.size(0, TAB_ROW_HEIGHT + SCROLLBAR_HEIGHT)
+        minimumSize = JBUI.size(0, TAB_ROW_HEIGHT + SCROLLBAR_HEIGHT)
     }
     private val tabContent: JPanel = JPanel(CardLayout()).apply { isOpaque = false }
     private val languageCombo: ComboBox<FileType> = ComboBox(textFileTypes())
@@ -323,7 +322,7 @@ class TypeWriterDialog(private val project: Project) :
     private fun createEditorField(fileType: FileType, text: String): EditorTextField {
         val document = createDocument(fileType, text)
         return EditorTextField(document, project, fileType, false, false).apply {
-            preferredSize = Dimension(720, 320)
+            preferredSize = JBUI.size(720, 320)
             addSettingsProvider { editor ->
                 editor.settings.isLineNumbersShown = true
                 editor.settings.isUseSoftWraps = true
@@ -391,12 +390,12 @@ class TypeWriterDialog(private val project: Project) :
         val sq = Dimension(comboH, comboH)
         settingsButton.preferredSize = sq
         plusButton.preferredSize = sq
-        val rightTools = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply {
+        val rightTools = JPanel(FlowLayout(FlowLayout.RIGHT, JBUI.scale(4), 0)).apply {
             isOpaque = false
             add(plusButton)
             add(settingsButton)
         }
-        val toolbar = JPanel(BorderLayout(4, 0)).apply {
+        val toolbar = JPanel(BorderLayout(JBUI.scale(4), 0)).apply {
             add(languageCombo, BorderLayout.CENTER)
             add(rightTools, BorderLayout.EAST)
         }
@@ -411,18 +410,18 @@ class TypeWriterDialog(private val project: Project) :
         }
         // Match the macros-header buttons' height to the tab strip's natural height so the two
         // header rows line up across the splitter.
-        val tabH = 30
+        val tabH = JBUI.scale(30)
         listOf(enrichButton, clearMacrosButton, customMacrosButton).forEach {
             it.preferredSize = Dimension(it.preferredSize.width, tabH)
-            it.margin = Insets(0, 12, 0, 12)
+            it.margin = JBUI.insets(0, 12)
         }
-        val macroHeader = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
+        val macroHeader = JPanel(FlowLayout(FlowLayout.LEFT, JBUI.scale(4), 0)).apply {
             add(enrichButton)
             add(clearMacrosButton)
             add(customMacrosButton)
         }
         val macroColumn = JPanel(BorderLayout(0, 0)).apply {
-            preferredSize = Dimension(240, 0)
+            preferredSize = JBUI.size(240, 0)
             add(macroHeader, BorderLayout.NORTH)
             add(macroScroll, BorderLayout.CENTER)
         }
@@ -893,7 +892,7 @@ class TypeWriterDialog(private val project: Project) :
         private val onSelect: () -> Unit,
         private val onClose: () -> Unit,
         private val onRename: () -> Unit,
-    ) : JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)) {
+    ) : JPanel(FlowLayout(FlowLayout.LEFT, JBUI.scale(4), 0)) {
 
         private val label = JLabel(state.name).apply {
             toolTipText = message("dialog.rename.tab.tooltip")
@@ -904,8 +903,8 @@ class TypeWriterDialog(private val project: Project) :
             isFocusable = false
             isContentAreaFilled = false
             isBorderPainted = false
-            margin = Insets(0, 0, 0, 0)
-            preferredSize = Dimension(16, 16)
+            margin = JBUI.emptyInsets()
+            preferredSize = JBUI.size(16, 16)
             toolTipText = message("dialog.close.tab")
             addActionListener { onClose() }
         }
