@@ -6,8 +6,10 @@ import games.engineroom.typewriter.commands.CaretDirection
 import games.engineroom.typewriter.commands.CaretMoveByDirectionCommand
 import games.engineroom.typewriter.commands.Command
 import games.engineroom.typewriter.commands.EnterCommand
+import games.engineroom.typewriter.commands.EscapeCommand
 import games.engineroom.typewriter.commands.GotoCommand
 import games.engineroom.typewriter.commands.ImportCommand
+import games.engineroom.typewriter.commands.KeyPressCommand
 import games.engineroom.typewriter.commands.MoveCaretCommand
 import games.engineroom.typewriter.commands.PauseCommand
 import games.engineroom.typewriter.commands.PressTabCommand
@@ -21,6 +23,7 @@ import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Key
+import java.awt.event.KeyEvent
 import kotlin.random.Random
 
 class TypeWriterAction : DumbAwareAction() {
@@ -480,16 +483,58 @@ fun executeTyping(
                     commands += PressTabCommand(delayBeforeTab, pause(), editor)
                 }
             }
-            // Simulate a single named key press at the caret. Currently supports `tab` and
-            // `enter`. Each press plays a click sound and uses the standard typing-pace pause.
-            // Unknown keys silently no-op (consistent with the rest of the macro set). Tab here
-            // goes through the editor-tab action handler (focus-independent) — for snippet
-            // expansion that needs the keymap dispatcher, use `{{snip:...}}` instead.
+            // Simulate a single named key press. Each press plays a click sound and uses the
+            // standard typing-pace pause. Unknown keys silently no-op (consistent with the rest
+            // of the macro set).
+            //
+            // Routing differs by key:
+            //   - `tab` / `enter` / `esc` go through the editor's action handler (smart-tab,
+            //     smart-enter, EditorEscape's action chain that dismisses lookup/hints/popups).
+            //     For snippet expansion that needs the keymap dispatcher, use `{{snip:...}}`.
+            //   - `alt+enter` is posted through `IdeEventQueue` so `IdeKeyEventDispatcher` routes
+            //     it via the keymap to ShowIntentionActions — calling the action handler directly
+            //     wouldn't engage that dispatcher and Rider's protocol-backed popup wouldn't show.
+            //   - `up` / `down` / `left` / `right` are also `IdeEventQueue` posts, but targeted at
+            //     whatever currently has focus (rather than the editor) — meant for nudging an
+            //     intentions/completion popup that opened above the editor.
             "key" -> {
                 indentOwnedByIde = false
                 when (rest.trim().lowercase()) {
                     "tab" -> commands += TabCommand(pause(), editor)
                     "enter" -> commands += EnterCommand(pause(), editor)
+                    "alt+enter", "alt-enter" -> commands += KeyPressCommand(
+                        keyCode = KeyEvent.VK_ENTER,
+                        modifiers = KeyEvent.ALT_DOWN_MASK,
+                        keyChar = '\n',
+                        forceEditorFocus = true,
+                        pauseAfter = pause(),
+                        editor = editor,
+                    )
+                    "up" -> commands += KeyPressCommand(
+                        keyCode = KeyEvent.VK_UP,
+                        forceEditorFocus = false,
+                        pauseAfter = pause(),
+                        editor = editor,
+                    )
+                    "down" -> commands += KeyPressCommand(
+                        keyCode = KeyEvent.VK_DOWN,
+                        forceEditorFocus = false,
+                        pauseAfter = pause(),
+                        editor = editor,
+                    )
+                    "left" -> commands += KeyPressCommand(
+                        keyCode = KeyEvent.VK_LEFT,
+                        forceEditorFocus = false,
+                        pauseAfter = pause(),
+                        editor = editor,
+                    )
+                    "right" -> commands += KeyPressCommand(
+                        keyCode = KeyEvent.VK_RIGHT,
+                        forceEditorFocus = false,
+                        pauseAfter = pause(),
+                        editor = editor,
+                    )
+                    "esc", "escape" -> commands += EscapeCommand(pause(), editor)
                 }
             }
             "complete" -> {
