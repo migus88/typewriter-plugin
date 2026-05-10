@@ -6,6 +6,16 @@
 
     <depends>com.intellij.modules.platform</depends>
 
+    <extensions defaultExtensionNs="com.intellij">
+        <!--
+          Registered for any language so it can fire inside whatever file type the user picked
+          for a tab. The contributor itself bails out for files that aren't tagged with
+          TYPEWRITER_DIALOG_FILE_KEY, so the IDE's normal completion isn't affected.
+        -->
+        <completion.contributor language="any"
+                                implementationClass="games.engineroom.typewriter.TypewriterCompletionContributor"/>
+    </extensions>
+
     <actions resource-bundle="messages.TypeWriterBundle">
         <action id="games.engine-room.typewriter.TypeWriterAction"
                 class="games.engineroom.typewriter.TypeWriterAction"

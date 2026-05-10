@@ -1,17 +1,22 @@
 package games.engineroom.typewriter
 
 import games.engineroom.typewriter.TypeWriterBundle.message
+import com.intellij.codeInsight.AutoPopupController
+import com.intellij.codeInsight.lookup.LookupManager
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.actionSystem.CustomShortcutSet
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.EditorFactory
+import com.intellij.openapi.editor.event.DocumentEvent
+import com.intellij.openapi.editor.event.DocumentListener
 import com.intellij.openapi.util.TextRange
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileEditorManager
@@ -41,6 +46,7 @@ import java.awt.Container
 import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Font
+import java.awt.FontMetrics
 import java.awt.event.ActionEvent
 import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
@@ -60,13 +66,82 @@ import javax.swing.SwingUtilities
 
 private val ENRICH_LOG = logger<TypeWriterDialog>()
 
+/** Strip HTML tags from a description string for use in the manually-wrapped list cell. */
+private fun stripHtmlTags(text: String): String =
+    text.replace(Regex("<[^>]*>"), "").replace(Regex("\\s+"), " ").trim()
+
 /**
- * Minimal HTML escaper for the macro list's description label. Built-in descriptions ship with
- * intentional `<b>` markup and aren't escaped; user-supplied custom-macro descriptions go through
- * this helper so a stray `<` or `&` doesn't break the surrounding `<html>` wrapper.
+ * Greedy word-wrap [plain] into at most [maxLines] lines that each fit inside [maxWidth] pixels
+ * under [fm]. The final line gets a trailing ellipsis when the input doesn't fully fit. Single
+ * words wider than [maxWidth] are broken at the last character that still fits, so a giant
+ * unbroken token can't blow out the cell.
  */
-private fun escapeHtmlForLabel(text: String): String =
-    text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+private fun fitDescription(
+    plain: String,
+    maxLines: Int,
+    maxWidth: Int,
+    fm: FontMetrics,
+): List<String> {
+    if (maxLines <= 0 || maxWidth <= 0 || plain.isEmpty()) return emptyList()
+
+    val words = plain.split(' ').filter { it.isNotEmpty() }
+    val lines = mutableListOf<String>()
+    var line = StringBuilder()
+    var i = 0
+
+    fun flush() {
+        if (line.isNotEmpty()) lines.add(line.toString())
+        line = StringBuilder()
+    }
+
+    while (i < words.size) {
+        val word = words[i]
+        val candidate = if (line.isEmpty()) word else "$line $word"
+        if (fm.stringWidth(candidate) <= maxWidth) {
+            line = StringBuilder(candidate)
+            i++
+        } else if (line.isEmpty()) {
+            val cap = breakWordToFit(word, maxWidth, fm)
+            if (cap.isEmpty()) break
+            line = StringBuilder(cap)
+            flush()
+            i++
+            if (lines.size >= maxLines) break
+        } else {
+            flush()
+            if (lines.size >= maxLines) break
+        }
+    }
+    flush()
+
+    if (lines.size > maxLines) {
+        val capped = lines.take(maxLines).toMutableList()
+        capped[maxLines - 1] = appendEllipsis(capped[maxLines - 1], maxWidth, fm)
+        return capped
+    }
+    if (i < words.size && lines.size == maxLines) {
+        lines[lines.size - 1] = appendEllipsis(lines[lines.size - 1], maxWidth, fm)
+    }
+    return lines
+}
+
+private fun breakWordToFit(word: String, maxWidth: Int, fm: FontMetrics): String {
+    val out = StringBuilder()
+    for (c in word) {
+        val candidate = StringBuilder(out).append(c).toString()
+        if (fm.stringWidth(candidate) <= maxWidth) out.append(c) else break
+    }
+    return out.toString()
+}
+
+private fun appendEllipsis(line: String, maxWidth: Int, fm: FontMetrics): String {
+    val ellipsis = "…"
+    var s = line
+    while (s.isNotEmpty() && fm.stringWidth("$s$ellipsis") > maxWidth) {
+        s = s.dropLast(1).trimEnd()
+    }
+    return "$s$ellipsis"
+}
 
 class TypeWriterDialog(private val project: Project) :
     DialogWrapper(project, true, IdeModalityType.MODELESS) {
@@ -133,9 +208,16 @@ class TypeWriterDialog(private val project: Project) :
     // The renderer surfaces each macro's description directly inside the cell, so a hover
     // tooltip would just duplicate it (and pop out of bounds for long descriptions). Rely on
     // the inline rendering instead — no per-cell tooltip.
+    //
+    // `setExpandableItemsEnabled(false)` turns off JBList's hover-to-expand overlay. With it on,
+    // hovering a macro renders a popup *over* surrounding UI to show the row's "full" content —
+    // which both overlays the column's neighbours and truncates the wrapped HTML description on
+    // its right edge. The inline cell already shows the full description, so the overlay only
+    // adds noise.
     private val macroList: JBList<MacroEntry> = JBList(macroListModel).apply {
         selectionMode = ListSelectionModel.SINGLE_SELECTION
         cellRenderer = makeMacroRenderer()
+        setExpandableItemsEnabled(false)
         addMouseListener(object : MouseAdapter() {
             override fun mouseClicked(e: MouseEvent) {
                 if (e.clickCount == 2 && SwingUtilities.isLeftMouseButton(e)) {
@@ -340,6 +422,7 @@ class TypeWriterDialog(private val project: Project) :
                 editor.setVerticalScrollbarVisible(true)
                 editor.setHorizontalScrollbarVisible(true)
                 installPlainEnterHandler(editor)
+                installAutoPopupTrigger(editor)
                 macroHighlighters += MacroHighlighter(
                     editor,
                     disposable,
@@ -353,12 +436,73 @@ class TypeWriterDialog(private val project: Project) :
     }
 
     /**
+     * Schedule the IDE's completion auto-popup ([AutoPopupController]) when the user types
+     * either the closing character of the configured opening marker (so macro suggestions appear
+     * the moment they open `` `{ ``) or the second consecutive identifier character (so word /
+     * keyword completion behaves like the IDE editors).
+     *
+     * [TypewriterCompletionContributor] decides what the popup actually contains; this listener
+     * just decides *when* to schedule it. The single-char filter (`newLength == 1 &&
+     * oldLength == 0`) excludes programmatic mutations — Enrich/Clear macros, plain-Enter inserts,
+     * macro-list inserts via [insertMacro], and lookup-accept replacements are all multi-char or
+     * have non-zero `oldLength`.
+     */
+    private fun installAutoPopupTrigger(editor: Editor) {
+        editor.document.addDocumentListener(object : DocumentListener {
+            override fun documentChanged(event: DocumentEvent) {
+                if (event.newLength != 1 || event.oldLength != 0) return
+
+                val typed = event.newFragment[0]
+                val docText = event.document.charsSequence
+                val caretAfter = event.offset + 1
+
+                val open = openingSequence
+                val openLast = open.lastOrNull()
+                val justClosedOpener = openLast != null &&
+                    typed == openLast &&
+                    caretAfter >= open.length &&
+                    matchesAt(docText, open, caretAfter - open.length)
+
+                val prev = if (event.offset > 0) docText[event.offset - 1] else ' '
+                val isSecondIdentChar = isIdentifierChar(typed) && isIdentifierChar(prev)
+
+                if (justClosedOpener || isSecondIdentChar) {
+                    ApplicationManager.getApplication().invokeLater {
+                        if (project.isDisposed) return@invokeLater
+                        AutoPopupController.getInstance(project).scheduleAutoPopup(editor)
+                    }
+                }
+            }
+
+            private fun matchesAt(text: CharSequence, marker: String, offset: Int): Boolean {
+                for (j in marker.indices) {
+                    if (text[offset + j] != marker[j]) return false
+                }
+                return true
+            }
+
+            private fun isIdentifierChar(c: Char): Boolean =
+                c.isLetterOrDigit() || c == '_'
+        }, disposable)
+    }
+
+    /**
      * Replace the language's smart-Enter with a plain newline that preserves the current line's
      * leading whitespace. Without this, languages like C# auto-indent every line break by 4
      * spaces, even when the user just wants to lay text out manually.
+     *
+     * When the completion lookup is active, the action disables itself in [AnAction.update] —
+     * `IdeKeyEventDispatcher` then skips it and the keystroke falls through to the lookup's own
+     * Enter handler, which accepts the highlighted entry. Without this gate, picking a macro from
+     * the auto-completion popup with Enter inserted a newline instead.
      */
     private fun installPlainEnterHandler(editor: Editor) {
         val plainEnter = object : AnAction() {
+            override fun update(e: AnActionEvent) {
+                val ed = e.getData(CommonDataKeys.EDITOR) ?: editor
+                e.presentation.isEnabled = LookupManager.getActiveLookup(ed) == null
+            }
+
             override fun actionPerformed(e: AnActionEvent) {
                 val ed = e.getData(CommonDataKeys.EDITOR) ?: editor
                 val caret = ed.caretModel.primaryCaret
@@ -384,6 +528,10 @@ class TypeWriterDialog(private val project: Project) :
     private fun createDocument(fileType: FileType, text: String): Document {
         val ext = fileType.defaultExtension.ifBlank { "txt" }
         val virtualFile = LightVirtualFile("typewriter_input.$ext", fileType, text)
+        // Tag the file so TypewriterCompletionContributor knows it should fire here (and only
+        // here — the contributor is registered for `language="any"` so the tag is what gates it
+        // out of every other editor in the IDE).
+        virtualFile.putUserData(TYPEWRITER_DIALOG_FILE_KEY, true)
         return FileDocumentManager.getInstance().getDocument(virtualFile)
             ?: EditorFactory.getInstance().createDocument(text)
     }
@@ -482,14 +630,15 @@ class TypeWriterDialog(private val project: Project) :
     }
 
     /**
-     * Macro list renderer — two-line cells with the syntax on top and a smaller, dimmer
-     * description below. Description supports HTML markup (built-ins use `<b>` to highlight
-     * predefined option sets; custom-macro descriptions are escaped before being inserted).
+     * Macro list renderer — two-block cells with the syntax on top and a smaller, dimmer
+     * description below. Descriptions are manually word-wrapped via [fitDescription] (capped at
+     * 3 lines, last line ellipsized when truncated) and rendered as one [JLabel] per line in a
+     * vertical stack. Manual wrapping replaced an earlier `<html><div style='width:...'>` JLabel
+     * approach because the HTML width hint didn't reliably match the actual cell viewport — long
+     * descriptions overran the right edge instead of wrapping cleanly.
      *
-     * The description label gets a width hint matching the list's current width so HTML wrapping
-     * happens at column width rather than running off the side. If the list hasn't been laid out
-     * yet (width == 0), we fall back to a sensible default so the cell still has a defined
-     * preferred height.
+     * Any HTML markup in the source description (e.g. `<b>` highlights in built-in messages) is
+     * stripped before wrapping; that's the cost of the more reliable rendering.
      *
      * Custom macros render in italic and the first one carries a 1-pixel top border, separating
      * the user's macros from the built-ins above without needing a non-selectable header row.
@@ -515,28 +664,30 @@ class TypeWriterDialog(private val project: Project) :
                 alignmentX = 0f
             }
 
-            val descText = value.description()
-            val descLabel: JLabel? = if (descText.isBlank()) null else {
-                // Width hint forces HTML wrapping at column width. JLabel honours its `foreground`
-                // for un-coloured HTML, so the dimmer description colour comes from the label
-                // itself — no per-theme hex extraction needed.
-                val widthHint = (list.width.takeIf { it > 0 } ?: 220) - JBUI.scale(24)
-                JLabel(
-                    "<html><div style='width:${widthHint}px;'>$descText</div></html>"
-                ).apply {
-                    font = font.deriveFont(font.size2D - JBUI.scale(1).toFloat())
-                    foreground = descFg
-                    alignmentX = 0f
-                }
+            val descText = stripHtmlTags(value.description())
+            val descFont = list.font.deriveFont(list.font.size2D - JBUI.scale(1).toFloat())
+            val descLines: List<String> = if (descText.isBlank()) emptyList() else {
+                // 8px horizontal padding each side (16) + 1px border + scrollbar gutter (~12px on
+                // macOS) + a few px safety. Falling back to 220 keeps the cell renderable during
+                // the first paint, before the list has been sized.
+                val maxWidth = (list.width.takeIf { it > 0 } ?: 220) - JBUI.scale(28)
+                val fm = list.getFontMetrics(descFont)
+                fitDescription(descText, maxLines = 3, maxWidth = maxWidth, fm = fm)
             }
 
             val column = JPanel().apply {
                 isOpaque = false
                 layout = BoxLayout(this, BoxLayout.Y_AXIS)
                 add(syntax)
-                if (descLabel != null) {
+                if (descLines.isNotEmpty()) {
                     add(javax.swing.Box.createVerticalStrut(JBUI.scale(2)))
-                    add(descLabel)
+                    for (line in descLines) {
+                        add(JLabel(line).apply {
+                            font = descFont
+                            foreground = descFg
+                            alignmentX = 0f
+                        })
+                    }
                 }
             }
 
@@ -685,54 +836,13 @@ class TypeWriterDialog(private val project: Project) :
         state.editorField.requestFocusInWindow()
     }
 
-    /**
-     * `placeholder` is the substring inside `pattern` that gets replaced by selected editor text
-     * when a macro is inserted while a selection is active. `null` means the macro has no
-     * placeholder and the selection is just overwritten with the rendered syntax.
-     */
-    private enum class MacroKind(
-        val pattern: String,
-        val descriptionKey: String,
-        val placeholder: String? = null,
-    ) {
-        PAUSE("{O}pause:1000{C}", "macro.pause.description"),
-        REFORMAT("{O}reformat{C}", "macro.reformat.description"),
-        BR("{O}br{C}", "macro.br.description"),
-        COMPLETE("{O}complete:3:Word{C}", "macro.complete.description", placeholder = "Word"),
-        COMPLETE_DELAY(
-            "{O}complete:3:500:Word{C}",
-            "macro.complete.delay.description",
-            placeholder = "Word",
-        ),
-        IMPORT_AUTO("{O}import:300{C}", "macro.import.auto.description"),
-        IMPORT_NS(
-            "{O}import:300:Namespace{C}",
-            "macro.import.ns.description",
-            placeholder = "Namespace",
-        ),
-        IMPORT_OPTION("{O}import:300::2{C}", "macro.import.option.description"),
-        CARET("{O}caret:up:3{C}", "macro.caret.description"),
-        BACKSPACE("{O}backspace:5{C}", "macro.backspace.description"),
-        BACKSPACE_HOLD("{O}backspace-hold:5{C}", "macro.backspace.hold.description"),
-        GOTO("{O}goto:String{C}", "macro.goto.description", placeholder = "String"),
-        GOTO_ANCHOR(
-            "{O}goto:Target:Anchor{C}",
-            "macro.goto.anchor.description",
-            placeholder = "Target",
-        ),
-        SNIP("{O}snip:ctor{C}", "macro.snip.description", placeholder = "ctor"),
-        SNIP_DELAY("{O}snip:ctor:500{C}", "macro.snip.delay.description", placeholder = "ctor"),
-        KEY_TAB("{O}key:tab{C}", "macro.key.tab.description"),
-        KEY_ENTER("{O}key:enter{C}", "macro.key.enter.description"),
-    }
-
     private sealed class MacroEntry {
         abstract fun render(open: String, close: String): String
         abstract fun placeholder(): String?
         /**
-         * Short description shown directly under the macro syntax in the list cell. May contain
-         * HTML markup (e.g. `<b>` for bold options) since the renderer wraps it in `<html>` —
-         * caller-supplied strings inside [Custom] are escaped before being concatenated.
+         * Short description shown directly under the macro syntax in the list cell. The renderer
+         * strips HTML tags before measuring/wrapping, so this can return raw bundle messages
+         * (which may include `<b>` markup) without breaking the layout.
          */
         abstract fun description(): String
 
@@ -762,7 +872,7 @@ class TypeWriterDialog(private val project: Project) :
             // (insertMacro) drops the highlighted token into the first positional argument slot,
             // matching how built-in placeholders like `Word`/`Namespace` behave.
             override fun placeholder(): String? = parameters.firstOrNull()
-            override fun description(): String = escapeHtmlForLabel(descriptionText)
+            override fun description(): String = descriptionText
         }
     }
 
