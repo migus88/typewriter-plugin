@@ -39,6 +39,9 @@ internal enum class MacroKind(
     SNIP("{O}snip:ctor{C}", "macro.snip.description", placeholder = "ctor"),
     SNIP_DELAY("{O}snip:ctor:500{C}", "macro.snip.delay.description", placeholder = "ctor"),
     KEY("{O}key:enter{C}", "macro.key.description"),
+    SELECT("{O}select:forward:5{C}", "macro.select.description"),
+    SELECT_HOME("{O}select-home{C}", "macro.select.home.description"),
+    SELECT_END("{O}select-end{C}", "macro.select.end.description"),
     ;
 
     /** Pattern with the `{O}`/`{C}` markers stripped — what the macro looks like inside markers. */

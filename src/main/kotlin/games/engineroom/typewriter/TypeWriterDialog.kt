@@ -62,7 +62,7 @@ import javax.swing.ListCellRenderer
 import javax.swing.ListSelectionModel
 import javax.swing.SwingUtilities
 
-private val ENRICH_LOG = logger<TypeWriterDialog>()
+private val LOG = logger<TypeWriterDialog>()
 
 /** Strip HTML tags from a description string for use in the manually-wrapped list cell. */
 private fun stripHtmlTags(text: String): String =
@@ -757,7 +757,7 @@ class TypeWriterDialog(private val project: Project) :
             if (transformed == current) return
             replaceTabText(state, transformed)
         } catch (t: Throwable) {
-            ENRICH_LOG.error("Enrich dialog failed", t)
+            LOG.error("Enrich dialog failed", t)
             Messages.showErrorDialog(
                 project,
                 "Enrich failed: ${t.javaClass.simpleName}: ${t.message}",
@@ -778,7 +778,7 @@ class TypeWriterDialog(private val project: Project) :
             if (transformed == current) return
             replaceTabText(state, transformed)
         } catch (t: Throwable) {
-            ENRICH_LOG.error("Clear macros failed", t)
+            LOG.error("Clear macros failed", t)
             Messages.showErrorDialog(
                 project,
                 "Clear macros failed: ${t.javaClass.simpleName}: ${t.message}",
@@ -976,13 +976,19 @@ class TypeWriterDialog(private val project: Project) :
 
     override fun dispose() {
         scheduler.stop()
-        try {
-            if (::dialogPanel.isInitialized) {
-                dialogPanel.apply()
+        // Persist on every dispose path — close button, Cancel, OK with keepOpen=false. The
+        // earlier version called `dialogPanel.apply()` first inside a broad `catch (_: Throwable)`,
+        // and when that throw-path fired during teardown the entire `persistSettings()` call was
+        // skipped silently — which is the bug the user saw as "the tab's edits get lost unless I
+        // started typing at least once" (Start has its own explicit persist call). The dialog has
+        // no Kotlin UI DSL property bindings, so `apply()` was a no-op anyway; drop it and surface
+        // any persistence exception via the logger instead of swallowing it.
+        if (::dialogPanel.isInitialized) {
+            try {
                 persistSettings()
+            } catch (t: Throwable) {
+                LOG.warn("Failed to persist TypeWriter dialog settings on dispose", t)
             }
-        } catch (_: Throwable) {
-            // panel may already be disposed; not worth surfacing
         }
         TypeWriterAction.clearOpenDialog(project, this)
         super.dispose()

@@ -5,6 +5,7 @@ import games.engineroom.typewriter.commands.BackspaceHoldCommand
 import games.engineroom.typewriter.commands.CaretDirection
 import games.engineroom.typewriter.commands.CaretMoveByDirectionCommand
 import games.engineroom.typewriter.commands.Command
+import games.engineroom.typewriter.commands.EditorActionCommand
 import games.engineroom.typewriter.commands.EnterCommand
 import games.engineroom.typewriter.commands.EscapeCommand
 import games.engineroom.typewriter.commands.GotoCommand
@@ -66,6 +67,7 @@ private const val SNIP_DEFAULT_DELAY_MS: Long = 200L
 val BUILT_IN_MACRO_NAMES: Set<String> = setOf(
     "pause", "reformat", "caret", "carret", "import",
     "backspace", "backspace-hold", "goto", "snip", "key", "complete", "br",
+    "select", "select-home", "select-end",
 )
 
 /**
@@ -503,6 +505,9 @@ fun executeTyping(
             //   - `up` / `down` / `left` / `right` are also `IdeEventQueue` posts, but targeted at
             //     whatever currently has focus (rather than the editor) — meant for nudging an
             //     intentions/completion popup that opened above the editor.
+            //   - `home` / `end` go through the editor action handler (`EditorLineStart` /
+            //     `EditorLineEnd`) so language-specific smart-home behaviour fires (toggling
+            //     between first-non-whitespace and column 0 on repeated presses).
             "key" -> {
                 indentOwnedByIde = false
                 when (rest.trim().lowercase()) {
@@ -546,8 +551,62 @@ fun executeTyping(
                         pauseAfter = pause(),
                         editor = editor,
                     )
+                    "home" -> commands += EditorActionCommand(
+                        actionId = "EditorLineStart",
+                        pauseAfter = pause(),
+                        editor = editor,
+                    )
+                    "end" -> commands += EditorActionCommand(
+                        actionId = "EditorLineEnd",
+                        pauseAfter = pause(),
+                        editor = editor,
+                    )
                     "esc", "escape" -> commands += EscapeCommand(pause(), editor)
                 }
+            }
+            // Extend the selection one character per tick. Each step routes through the IDE's
+            // "EditorLeftWithSelection" / "EditorRightWithSelection" action — same code path as
+            // pressing Shift+Left or Shift+Right N times — with a click sound and the standard
+            // jittered pause per step. `back` and `forward` are accepted (matching the macro's
+            // documented direction names); `left` and `right` are aliases. Unknown direction or
+            // non-positive count silently no-ops.
+            "select" -> {
+                val firstColon = rest.indexOf(':')
+                if (firstColon > 0) {
+                    val dirStr = rest.substring(0, firstColon).trim().lowercase()
+                    val countStr = rest.substring(firstColon + 1).trim()
+                    val count = countStr.toIntOrNull() ?: 0
+                    val actionId = when (dirStr) {
+                        "back", "left" -> "EditorLeftWithSelection"
+                        "forward", "right" -> "EditorRightWithSelection"
+                        else -> null
+                    }
+                    if (actionId != null && count > 0) {
+                        indentOwnedByIde = false
+                        repeat(count) {
+                            commands += EditorActionCommand(actionId, pause(), editor)
+                        }
+                    }
+                }
+            }
+            // Extend the selection from the caret to the line's "home" — the IDE decides where
+            // that is (Rider/IDEA toggle between first non-whitespace column and column 0 on
+            // repeated presses). One click sound + jittered pause, like a single Shift+Home press.
+            "select-home" -> {
+                indentOwnedByIde = false
+                commands += EditorActionCommand(
+                    actionId = "EditorLineStartWithSelection",
+                    pauseAfter = pause(),
+                    editor = editor,
+                )
+            }
+            "select-end" -> {
+                indentOwnedByIde = false
+                commands += EditorActionCommand(
+                    actionId = "EditorLineEndWithSelection",
+                    pauseAfter = pause(),
+                    editor = editor,
+                )
             }
             "complete" -> {
                 indentOwnedByIde = false
