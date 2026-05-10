@@ -488,9 +488,15 @@ fun executeTyping(
             // of the macro set).
             //
             // Routing differs by key:
-            //   - `tab` / `enter` / `esc` go through the editor's action handler (smart-tab,
-            //     smart-enter, EditorEscape's action chain that dismisses lookup/hints/popups).
-            //     For snippet expansion that needs the keymap dispatcher, use `{{snip:...}}`.
+            //   - `tab` goes through the editor's action handler (smart-tab). For snippet expansion
+            //     that needs the keymap dispatcher, use `{{snip:...}}`.
+            //   - `esc` runs `EscapeCommand`, which combines lookup-hide, AutoPopupController
+            //     cancel, and an `IdeEventQueue` Esc post — best-effort dismiss of any open popup.
+            //   - `enter` is posted through `IdeEventQueue` to *whatever currently has focus*. When
+            //     a popup is open (e.g. after `{{key:alt+enter}}`) the keystroke selects the
+            //     highlighted item; when focus is on the editor, the keymap routes Enter to the
+            //     editor-enter action so smart-enter still fires. Routing via the editor's action
+            //     handler directly here would bypass any popup and just insert a newline.
             //   - `alt+enter` is posted through `IdeEventQueue` so `IdeKeyEventDispatcher` routes
             //     it via the keymap to ShowIntentionActions — calling the action handler directly
             //     wouldn't engage that dispatcher and Rider's protocol-backed popup wouldn't show.
@@ -501,7 +507,13 @@ fun executeTyping(
                 indentOwnedByIde = false
                 when (rest.trim().lowercase()) {
                     "tab" -> commands += TabCommand(pause(), editor)
-                    "enter" -> commands += EnterCommand(pause(), editor)
+                    "enter" -> commands += KeyPressCommand(
+                        keyCode = KeyEvent.VK_ENTER,
+                        keyChar = '\n',
+                        forceEditorFocus = false,
+                        pauseAfter = pause(),
+                        editor = editor,
+                    )
                     "alt+enter", "alt-enter" -> commands += KeyPressCommand(
                         keyCode = KeyEvent.VK_ENTER,
                         modifiers = KeyEvent.ALT_DOWN_MASK,
