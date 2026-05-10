@@ -10,9 +10,9 @@ enum class ScrollTarget { TOP, BOTTOM, CENTER }
 
 /**
  * Per-editor user data key holding the active auto-scroll target, or `null` when auto-scroll is
- * off. Set by [SetAutoScrollCommand]; consulted by [applyAutoScrollIfActive] from any command
- * that inserts a `\n`. Lives on the editor (rather than a global service) so concurrent runs in
- * different editors don't trample each other.
+ * off. Set by [SetAutoScrollCommand]; consulted by [applyAutoScrollIfActive] from every text
+ * insert. Lives on the editor (rather than a global service) so concurrent runs in different
+ * editors don't trample each other.
  */
 val SCROLL_AUTO_KEY: Key<ScrollTarget> = Key.create("typewriter.scroll.auto")
 
@@ -20,8 +20,8 @@ val SCROLL_AUTO_KEY: Key<ScrollTarget> = Key.create("typewriter.scroll.auto")
  * Apply the editor's current auto-scroll setting (if any) at the current caret position. No-op
  * when auto-scroll is off. Safe to call from off-EDT — wraps the scroll in `invokeAndWait`.
  *
- * Called from [EnterCommand] and [WriteTextCommand]'s multi-char path so the viewport snaps back
- * to the user's chosen position after every line break.
+ * Called from [EnterCommand] and from every [WriteTextCommand] tick (single- and multi-char) so
+ * the viewport snaps back to the user's chosen position after every typed character.
  */
 fun applyAutoScrollIfActive(editor: Editor) {
     val target = editor.getUserData(SCROLL_AUTO_KEY) ?: return
@@ -67,13 +67,12 @@ class ScrollCommand(
 }
 
 /**
- * Arm or disarm auto-scroll on the editor. When [target] is non-null, every subsequent `\n`
- * insertion (via [EnterCommand] or [WriteTextCommand]'s multi-char path) re-scrolls the viewport
- * to that target. When [target] is `null`, auto-scroll turns off and newlines stop driving the
- * viewport.
+ * Arm or disarm auto-scroll on the editor. When [target] is non-null, every subsequent text
+ * insert (each [WriteTextCommand] tick and each [EnterCommand]) re-scrolls the viewport to that
+ * target. When [target] is `null`, auto-scroll turns off and inserts stop driving the viewport.
  *
  * Doesn't immediately scroll on its own — flipping the switch is what the user asked for; the
- * first scroll fires on the next typed line break.
+ * first scroll fires on the next typed character.
  */
 class SetAutoScrollCommand(
     private val target: ScrollTarget?,

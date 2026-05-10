@@ -150,11 +150,11 @@ Three forms, all sharing one direction set (`top`/`up`, `bottom`/`down`, `center
 - `{{scroll:DIR:start}}` — arms auto-scroll. `SetAutoScrollCommand` writes the chosen `ScrollTarget` into `Editor.putUserData(SCROLL_AUTO_KEY, …)`.
 - `{{scroll:DIR:end}}` and `{{scroll:end}}` — disarm. Both clear the same user-data key (`SetAutoScrollCommand(target = null)`); the direction in the longer form is ignored because state lives on the editor.
 
-While the key is set, **`EnterCommand` and `WriteTextCommand`'s multi-char path call `applyAutoScrollIfActive(editor)`** after their own `scrollToCaret(RELATIVE)`. The helper reads the key, dispatches an EDT call, and applies the target. Single-char `WriteTextCommand` deliberately doesn't fire it (single chars are never `\n`); `BackspaceCommand`/`BackspaceHoldCommand` don't either, since deleting characters isn't a "line break" by the user's definition.
+While the key is set, **`EnterCommand` and every `WriteTextCommand` tick (both the single-char TypedAction route and the multi-char `insertString` route) call `applyAutoScrollIfActive(editor)`** after their own `scrollToCaret(RELATIVE)`. The helper reads the key, dispatches an EDT call, and applies the target. Auto-scroll fires on every typed character, not just line breaks — armed against `bottom`, the viewport hugs the caret one keystroke at a time as the document grows. `BackspaceCommand`/`BackspaceHoldCommand` deliberately don't call it, since deleting characters isn't an insert.
 
 `executeTyping` resets the key (`putUserData(SCROLL_AUTO_KEY, null)`) at the start of every run so a forgotten `{{scroll:end}}` doesn't bleed into the next session under `keepOpen=true`.
 
-Sound: the one-shot scroll plays no sound (it's a viewport pan, not a key press); auto-scroll triggered by `\n` rides along on the existing `playEnter()` from the enter/multi-char insert. `indentOwnedByIde` is intentionally not cleared by any scroll variant because nothing about the auto-indent state changes when the viewport moves.
+Sound: the one-shot scroll plays no sound (it's a viewport pan, not a key press); auto-scroll rides along on whatever sound the triggering insert already played (`playKey`/`playSpace` per character, `playEnter` for `\n`). `indentOwnedByIde` is intentionally not cleared by any scroll variant because nothing about the auto-indent state changes when the viewport moves.
 
 ### `{{backspace:N}}` and `{{backspace-hold:N}}` — deletion
 

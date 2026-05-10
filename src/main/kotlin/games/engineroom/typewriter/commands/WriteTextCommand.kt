@@ -47,16 +47,15 @@ class WriteTextCommand(
                 editor.scrollingModel.scrollToCaret(ScrollType.RELATIVE)
             }
         } else {
-            val containsNewline = text.contains('\n')
-            if (containsNewline) KeyboardSoundService.get().playEnter()
+            if (text.contains('\n')) KeyboardSoundService.get().playEnter()
             WriteCommandAction.runWriteCommandAction(editor.project) {
                 val offset = caret.offset
                 document.insertString(offset, text)
                 caret.moveToOffset(offset + text.length)
                 editor.scrollingModel.scrollToCaret(ScrollType.RELATIVE)
             }
-            if (containsNewline) applyAutoScrollIfActive(editor)
         }
+        applyAutoScrollIfActive(editor)
         Thread.sleep(pauseAfter.toLong())
     }
 }
