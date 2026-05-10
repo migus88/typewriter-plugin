@@ -60,6 +60,14 @@ import javax.swing.SwingUtilities
 
 private val ENRICH_LOG = logger<TypeWriterDialog>()
 
+/**
+ * Minimal HTML escaper for the macro list's description label. Built-in descriptions ship with
+ * intentional `<b>` markup and aren't escaped; user-supplied custom-macro descriptions go through
+ * this helper so a stray `<` or `&` doesn't break the surrounding `<html>` wrapper.
+ */
+private fun escapeHtmlForLabel(text: String): String =
+    text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
 class TypeWriterDialog(private val project: Project) :
     DialogWrapper(project, true, IdeModalityType.MODELESS) {
 
@@ -166,7 +174,7 @@ class TypeWriterDialog(private val project: Project) :
         model.clear()
         for (kind in MacroKind.entries) model.addElement(MacroEntry.BuiltIn(kind))
         for (data in settings.customMacros) {
-            model.addElement(MacroEntry.Custom(data.name, data.parameters.toList()))
+            model.addElement(MacroEntry.Custom(data.name, data.parameters.toList(), ""))
         }
     }
 
@@ -489,9 +497,14 @@ class TypeWriterDialog(private val project: Project) :
     }
 
     /**
-     * Macro list renderer — single-column list of monospaced macro syntax. Description text is
-     * surfaced via the list's per-cell tooltip rather than alongside the syntax to keep the panel
-     * narrow.
+     * Macro list renderer — two-line cells with the syntax on top and a smaller, dimmer
+     * description below. Description supports HTML markup (built-ins use `<b>` to highlight
+     * predefined option sets; custom-macro descriptions are escaped before being inserted).
+     *
+     * The description label gets a width hint matching the list's current width so HTML wrapping
+     * happens at column width rather than running off the side. If the list hasn't been laid out
+     * yet (width == 0), we fall back to a sensible default so the cell still has a defined
+     * preferred height.
      *
      * Custom macros render in italic and the first one carries a 1-pixel top border, separating
      * the user's macros from the built-ins above without needing a non-selectable header row.
@@ -501,24 +514,60 @@ class TypeWriterDialog(private val project: Project) :
             val isCustom = value is MacroEntry.Custom
             val isFirstCustom = isCustom &&
                 (index == 0 || list.model.getElementAt(index - 1) !is MacroEntry.Custom)
-            val panel = JPanel(BorderLayout()).apply {
+            val rowBg = if (selected) list.selectionBackground else list.background
+            val rowFg = if (selected) list.selectionForeground else list.foreground
+            // Inactive-text colour is theme-aware (lighter on dark, darker on light), giving the
+            // description natural contrast without us picking a fixed shade per theme.
+            val descFg: Color = if (selected) {
+                rowFg
+            } else {
+                com.intellij.util.ui.UIUtil.getInactiveTextColor()
+            }
+
+            val syntax = JLabel(value.render(openingSequence, closingSequence)).apply {
+                font = Font(Font.MONOSPACED, if (isCustom) Font.ITALIC else Font.PLAIN, font.size)
+                foreground = rowFg
+                alignmentX = 0f
+            }
+
+            val descText = value.description()
+            val descLabel: JLabel? = if (descText.isBlank()) null else {
+                // Width hint forces HTML wrapping at column width. JLabel honours its `foreground`
+                // for un-coloured HTML, so the dimmer description colour comes from the label
+                // itself — no per-theme hex extraction needed.
+                val widthHint = (list.width.takeIf { it > 0 } ?: 220) - JBUI.scale(24)
+                JLabel(
+                    "<html><div style='width:${widthHint}px;'>$descText</div></html>"
+                ).apply {
+                    font = font.deriveFont(font.size2D - JBUI.scale(1).toFloat())
+                    foreground = descFg
+                    alignmentX = 0f
+                }
+            }
+
+            val column = JPanel().apply {
+                isOpaque = false
+                layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                add(syntax)
+                if (descLabel != null) {
+                    add(javax.swing.Box.createVerticalStrut(JBUI.scale(2)))
+                    add(descLabel)
+                }
+            }
+
+            JPanel(BorderLayout()).apply {
                 isOpaque = true
-                background = if (selected) list.selectionBackground else list.background
+                background = rowBg
                 border = if (isFirstCustom) {
                     JBUI.Borders.compound(
                         JBUI.Borders.customLine(com.intellij.ui.JBColor.border(), 1, 0, 0, 0),
-                        JBUI.Borders.empty(4, 8),
+                        JBUI.Borders.empty(6, 8),
                     )
                 } else {
-                    JBUI.Borders.empty(4, 8)
+                    JBUI.Borders.empty(6, 8)
                 }
+                add(column, BorderLayout.CENTER)
             }
-            val syntax = JLabel(value.render(openingSequence, closingSequence)).apply {
-                font = Font(Font.MONOSPACED, if (isCustom) Font.ITALIC else Font.PLAIN, font.size)
-                foreground = if (selected) list.selectionForeground else list.foreground
-            }
-            panel.add(syntax, BorderLayout.WEST)
-            panel
         }
 
     private fun openSettingsDialog() {
@@ -696,30 +745,44 @@ class TypeWriterDialog(private val project: Project) :
         abstract fun render(open: String, close: String): String
         abstract fun tooltip(): String?
         abstract fun placeholder(): String?
+        /**
+         * Short description shown directly under the macro syntax in the list cell. May contain
+         * HTML markup (e.g. `<b>` for bold options) since the renderer wraps it in `<html>` —
+         * caller-supplied strings inside [Custom] are escaped before being concatenated.
+         */
+        abstract fun description(): String
 
         class BuiltIn(val kind: MacroKind) : MacroEntry() {
             override fun render(open: String, close: String): String =
                 kind.pattern.replace("{O}", open).replace("{C}", close)
             override fun tooltip(): String = message(kind.descriptionKey)
             override fun placeholder(): String? = kind.placeholder
+            override fun description(): String = message(kind.descriptionKey)
         }
 
         /**
-         * Custom macros render as `{{name}}` (or `{{name:Param1:Param2}}` when parameters are
+         * Custom macros render as `{name}` (or `{name:Param1:Param2}` when parameters are
          * defined). They expand to literal text via [expandCustomMacros] before the typing
          * pipeline sees them, with each `$paramName$` reference in the body substituted by the
          * matching positional argument.
          */
-        class Custom(val name: String, val parameters: List<String>) : MacroEntry() {
+        class Custom(
+            val name: String,
+            val parameters: List<String>,
+            private val descriptionText: String,
+        ) : MacroEntry() {
             override fun render(open: String, close: String): String {
                 if (parameters.isEmpty()) return "$open$name$close"
                 return "$open$name:${parameters.joinToString(":")}$close"
             }
-            override fun tooltip(): String = TypeWriterBundle.message("macro.custom.description")
+            override fun tooltip(): String = descriptionText.ifBlank {
+                TypeWriterBundle.message("macro.custom.description")
+            }
             // The first parameter doubles as the placeholder so a selection-replace insert
             // (insertMacro) drops the highlighted token into the first positional argument slot,
             // matching how built-in placeholders like `Word`/`Namespace` behave.
             override fun placeholder(): String? = parameters.firstOrNull()
+            override fun description(): String = escapeHtmlForLabel(descriptionText)
         }
     }
 
