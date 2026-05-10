@@ -134,7 +134,8 @@ class TypewriterCompletionContributor : CompletionContributor() {
                         // Once a colon appears the user has committed to a macro name and is
                         // typing arguments — suggesting other names there is just noise.
                         if (':' in macroPrefix) return
-                        addMacroCompletions(result.withPrefixMatcher(macroPrefix), settings, close)
+                        val activeFileType = virtualFile.fileType.name
+                        addMacroCompletions(result.withPrefixMatcher(macroPrefix), settings, close, activeFileType)
                     } else {
                         addWordCompletions(parameters, result)
                     }
@@ -179,10 +180,17 @@ class TypewriterCompletionContributor : CompletionContributor() {
         return true
     }
 
+    /**
+     * Custom macros are filtered against [activeFileTypeName]: a macro with no
+     * [CustomMacroData.fileTypeName] applies everywhere, while a language-pinned macro is only
+     * surfaced when the active file's [com.intellij.openapi.fileTypes.FileType.getName] matches.
+     * Built-in macros are language-agnostic and always offered.
+     */
     private fun addMacroCompletions(
         result: CompletionResultSet,
         settings: TypeWriterSettings,
         closingSequence: String,
+        activeFileTypeName: String,
     ) {
         val handler = MacroInsertHandler(closingSequence)
 
@@ -197,6 +205,7 @@ class TypewriterCompletionContributor : CompletionContributor() {
         }
 
         for (custom in settings.customMacros) {
+            if (custom.fileTypeName.isNotEmpty() && custom.fileTypeName != activeFileTypeName) continue
             val body = if (custom.parameters.isEmpty()) custom.name
             else "${custom.name}:${custom.parameters.joinToString(":")}"
             val builder = LookupElementBuilder.create(body)

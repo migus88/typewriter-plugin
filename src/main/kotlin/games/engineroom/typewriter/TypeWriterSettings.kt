@@ -45,6 +45,13 @@ class TypeWriterSettings : PersistentStateComponent<TypeWriterSettings> {
     var macroArgColor: Int = TypeWriterConstants.defaultMacroArgColor
 
     /**
+     * When true, the macro list cells render syntax only and surface the description through a
+     * hover tooltip instead of inline text. Default is false — descriptions show under the
+     * syntax in every cell, the way they have since the descriptions feature shipped.
+     */
+    var hideMacroDescriptions: Boolean = false
+
+    /**
      * Per-language keyword presets used by the enrichment dialog. Lazily populated — a language
      * only appears here once the user opens the enrich dialog while that language is active.
      */
@@ -125,4 +132,13 @@ class CustomMacroData {
      */
     @get:Attribute("description")
     var description: String = ""
+
+    /**
+     * Optional [com.intellij.openapi.fileTypes.FileType.getName] (e.g. "C#", "Kotlin"). Empty
+     * means the macro applies to every language and shows up in every tab's macro list and
+     * completion popup. When non-empty, the macro is only surfaced when the active tab's file
+     * type matches.
+     */
+    @get:Attribute("fileType")
+    var fileTypeName: String = ""
 }

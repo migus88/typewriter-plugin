@@ -203,19 +203,34 @@ class TypeWriterDialog(private val project: Project) :
     private val macroListModel: javax.swing.DefaultListModel<MacroEntry> =
         javax.swing.DefaultListModel<MacroEntry>().also { rebuildMacroEntries(it) }
 
-    // The renderer surfaces each macro's description directly inside the cell, so a hover
-    // tooltip would just duplicate it (and pop out of bounds for long descriptions). Rely on
-    // the inline rendering instead — no per-cell tooltip.
+    // The renderer surfaces each macro's description directly inside the cell when the
+    // [TypeWriterSettings.hideMacroDescriptions] setting is off (default). When it's on the
+    // description is omitted from the cell, and `getToolTipText(MouseEvent)` below resolves
+    // descriptions on hover instead — Swing's `JList.getToolTipText` does not forward to the
+    // cell renderer's tooltip, so hover lookup has to happen on the list itself.
     //
     // `setExpandableItemsEnabled(false)` turns off JBList's hover-to-expand overlay. With it on,
     // hovering a macro renders a popup *over* surrounding UI to show the row's "full" content —
     // which both overlays the column's neighbours and truncates the wrapped HTML description on
     // its right edge. The inline cell already shows the full description, so the overlay only
     // adds noise.
-    private val macroList: JBList<MacroEntry> = JBList(macroListModel).apply {
+    private val macroList: JBList<MacroEntry> = object : JBList<MacroEntry>(macroListModel) {
+        override fun getToolTipText(event: MouseEvent): String? {
+            if (!settings.hideMacroDescriptions) return super.getToolTipText(event)
+            val idx = locationToIndex(event.point)
+            if (idx < 0) return null
+            if (!getCellBounds(idx, idx).contains(event.point)) return null
+            val entry = model.getElementAt(idx) ?: return null
+            val desc = stripHtmlTags(entry.description())
+            return desc.ifBlank { null }
+        }
+    }.apply {
         selectionMode = ListSelectionModel.SINGLE_SELECTION
         cellRenderer = makeMacroRenderer()
         setExpandableItemsEnabled(false)
+        // Default JList ignores per-cell tooltips entirely; registering with the shared manager
+        // makes Swing route mouse-hover events into our `getToolTipText` override above.
+        javax.swing.ToolTipManager.sharedInstance().registerComponent(this)
         addMouseListener(object : MouseAdapter() {
             override fun mouseClicked(e: MouseEvent) {
                 if (e.clickCount == 2 && SwingUtilities.isLeftMouseButton(e)) {
@@ -232,10 +247,22 @@ class TypeWriterDialog(private val project: Project) :
         })
     }
 
+    /**
+     * Repopulate the macro list. Built-in macros always appear; custom macros are filtered down
+     * to those whose [CustomMacroData.fileTypeName] is empty (= "All languages") or matches the
+     * active tab's file type. The first call fires before [tabsState] is populated — there's no
+     * "active tab" yet, so we treat that case as "show every custom macro" and let the post-init
+     * refresh apply the filter.
+     */
     private fun rebuildMacroEntries(model: javax.swing.DefaultListModel<MacroEntry>) {
         model.clear()
         for (kind in MacroKind.entries) model.addElement(MacroEntry.BuiltIn(kind))
+        val activeFileTypeName = if (tabsState.isNotEmpty()) tabsState[activeTabIndex].fileType.name else null
         for (data in settings.customMacros) {
+            if (activeFileTypeName != null &&
+                data.fileTypeName.isNotEmpty() &&
+                data.fileTypeName != activeFileTypeName
+            ) continue
             model.addElement(MacroEntry.Custom(data.name, data.parameters.toList(), data.description))
         }
     }
@@ -299,7 +326,11 @@ class TypeWriterDialog(private val project: Project) :
             if (suppressLanguageListener) return@addActionListener
             val selected = languageCombo.selectedItem as? FileType ?: return@addActionListener
             val active = tabsState[activeTabIndex]
-            if (active.fileType != selected) active.swapFileType(selected)
+            if (active.fileType != selected) {
+                active.swapFileType(selected)
+                // Switching language changes which language-pinned custom macros apply.
+                refreshMacroList()
+            }
         }
 
         title = message("dialog.title")
@@ -345,7 +376,22 @@ class TypeWriterDialog(private val project: Project) :
         }
         (tabContent.layout as CardLayout).show(tabContent, tabsState[index].cardId)
         updateLanguageCombo()
+        // Per-language custom macros: the visible set depends on the active tab, so any tab
+        // switch needs to re-filter.
+        refreshMacroList()
         SwingUtilities.invokeLater { scrollTabIntoView(tabsState[index]) }
+    }
+
+    /**
+     * Re-run [rebuildMacroEntries] and force a layout pass. The cell renderer reads
+     * `settings.hideMacroDescriptions` (which can also change here, when the settings dialog
+     * closes), and rows now have variable height — so a plain repaint isn't enough.
+     */
+    private fun refreshMacroList() {
+        rebuildMacroEntries(macroListModel)
+        macroList.fixedCellHeight = -1
+        macroList.revalidate()
+        macroList.repaint()
     }
 
     private fun scrollTabIntoView(state: TabState) {
@@ -585,6 +631,10 @@ class TypeWriterDialog(private val project: Project) :
      *
      * Custom macros render in italic and the first one carries a 1-pixel top border, separating
      * the user's macros from the built-ins above without needing a non-selectable header row.
+     *
+     * When [TypeWriterSettings.hideMacroDescriptions] is true the inline description block is
+     * omitted; the description is preserved on the cell's `toolTipText` so a hover still surfaces
+     * it. JBList wires the per-cell tooltip via the renderer through [JBList.getToolTipText].
      */
     private fun makeMacroRenderer(): ListCellRenderer<in MacroEntry> =
         ListCellRenderer { list, value, index, selected, _ ->
@@ -609,7 +659,8 @@ class TypeWriterDialog(private val project: Project) :
 
             val descText = stripHtmlTags(value.description())
             val descFont = list.font.deriveFont(list.font.size2D - JBUI.scale(1).toFloat())
-            val descLines: List<String> = if (descText.isBlank()) emptyList() else {
+            val showInline = !settings.hideMacroDescriptions
+            val descLines: List<String> = if (!showInline || descText.isBlank()) emptyList() else {
                 // 8px horizontal padding each side (16) + 1px border + scrollbar gutter (~12px on
                 // macOS) + a few px safety. Falling back to 220 keeps the cell renderable during
                 // the first paint, before the list has been sized.
@@ -646,6 +697,11 @@ class TypeWriterDialog(private val project: Project) :
                     JBUI.Borders.empty(6, 8)
                 }
                 add(column, BorderLayout.CENTER)
+                // Hover tooltip carries the description when the inline block is hidden. A blank
+                // tooltip is suppressed so empty user descriptions don't render as an empty tip.
+                if (!showInline && descText.isNotBlank()) {
+                    toolTipText = descText
+                }
             }
         }
 
@@ -656,7 +712,7 @@ class TypeWriterDialog(private val project: Project) :
         // list / highlighter picks up the new markers and color without restarting.
         openingSequence = settings.openingSequence
         closingSequence = settings.closingSequence
-        macroList.repaint()
+        refreshMacroList()
         for (h in macroHighlighters) h.refresh()
     }
 
@@ -669,8 +725,7 @@ class TypeWriterDialog(private val project: Project) :
             closingSequence = closingSequence,
         )
         if (!dialog.showAndGet()) return
-        rebuildMacroEntries(macroListModel)
-        macroList.repaint()
+        refreshMacroList()
     }
 
     private fun openEnrichDialog() {

@@ -7,6 +7,7 @@ import com.intellij.openapi.ui.DialogWrapper.IdeModalityType
 import com.intellij.ui.ColorPanel
 import com.intellij.ui.dsl.builder.RightGap
 import com.intellij.ui.dsl.builder.bindIntText
+import com.intellij.ui.dsl.builder.bindSelected
 import com.intellij.ui.dsl.builder.bindText
 import com.intellij.ui.dsl.builder.columns
 import com.intellij.ui.dsl.builder.panel
@@ -36,6 +37,7 @@ class SettingsDialog(
     var closingSequence: String = settings.closingSequence
     var completionDelay: Int = settings.completionDelay
     var preExecutionPause: Int = settings.preExecutionPause
+    var hideMacroDescriptions: Boolean = settings.hideMacroDescriptions
 
     private val colorPanel: ColorPanel = ColorPanel().apply {
         selectedColor = Color(settings.macroColor)
@@ -102,6 +104,10 @@ class SettingsDialog(
             row(message("dialog.macro.arg.color")) {
                 cell(argColorPanel)
             }
+            row {
+                checkBox(message("dialog.hide.macro.descriptions"))
+                    .bindSelected(::hideMacroDescriptions)
+            }
         }
         return dialogPanel
     }
@@ -114,6 +120,7 @@ class SettingsDialog(
         settings.closingSequence = closingSequence
         settings.completionDelay = completionDelay
         settings.preExecutionPause = preExecutionPause
+        settings.hideMacroDescriptions = hideMacroDescriptions
         colorPanel.selectedColor?.rgb?.let { settings.macroColor = it }
         argColorPanel.selectedColor?.rgb?.let { settings.macroArgColor = it }
         super.doOKAction()
