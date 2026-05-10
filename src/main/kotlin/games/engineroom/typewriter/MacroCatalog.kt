@@ -42,6 +42,9 @@ internal enum class MacroKind(
     SELECT("{O}select:forward:5{C}", "macro.select.description"),
     SELECT_HOME("{O}select-home{C}", "macro.select.home.description"),
     SELECT_END("{O}select-end{C}", "macro.select.end.description"),
+    SCROLL("{O}scroll:center{C}", "macro.scroll.description"),
+    SCROLL_AUTO_START("{O}scroll:bottom:start{C}", "macro.scroll.auto.start.description"),
+    SCROLL_AUTO_END("{O}scroll:end{C}", "macro.scroll.auto.end.description"),
     ;
 
     /** Pattern with the `{O}`/`{C}` markers stripped — what the macro looks like inside markers. */

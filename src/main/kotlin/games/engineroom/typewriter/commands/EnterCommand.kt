@@ -32,6 +32,7 @@ class EnterCommand(
             handler.execute(editor, caret, dataContext)
             editor.scrollingModel.scrollToCaret(ScrollType.RELATIVE)
         }
+        applyAutoScrollIfActive(editor)
         Thread.sleep(pauseAfter.toLong())
     }
 }

@@ -138,7 +138,23 @@ Templates are inline directives in the source text, wrapped in the configured op
 
 ### `{{caret:DIR:N}}` — directional caret movement
 
-`CaretMoveByDirectionCommand` does one `caret.moveCaretRelatively(...)` step per command. The parser emits N copies so each press takes its own typewriter tick (and the standard delay/jitter pacing applies between presses, same way `complete` and the bracket-pair sequencer work). The action accepts both `caret` and `carret` so the typo is forgivable.
+`CaretMoveByDirectionCommand` does one `caret.moveCaretRelatively(...)` step per command and plays a single `KeyboardSoundService.playKey()` click per press — same audible pacing as `goto` and `select`. The parser emits N copies so each press takes its own typewriter tick (and the standard delay/jitter pacing applies between presses, same way `complete` and the bracket-pair sequencer work). The action accepts both `caret` and `carret` so the typo is forgivable.
+
+### `{{scroll:TARGET}}` and `{{scroll:TARGET:start}}` / `{{scroll:end}}` — viewport scrolling
+
+Three forms, all sharing one direction set (`top`/`up`, `bottom`/`down`, `center`/`centre`):
+
+- `{{scroll:DIR}}` — one-shot. `ScrollCommand` drives `editor.scrollingModel.scrollTo(...)` so the viewport moves and the caret stays put.
+  - `top` / `bottom` → `LogicalPosition(firstOrLastLine, 0)` with `ScrollType.MAKE_VISIBLE` lands the chosen edge of the document in the viewport.
+  - `center` → caret's current `LogicalPosition` with `ScrollType.CENTER` recenters the caret line.
+- `{{scroll:DIR:start}}` — arms auto-scroll. `SetAutoScrollCommand` writes the chosen `ScrollTarget` into `Editor.putUserData(SCROLL_AUTO_KEY, …)`.
+- `{{scroll:DIR:end}}` and `{{scroll:end}}` — disarm. Both clear the same user-data key (`SetAutoScrollCommand(target = null)`); the direction in the longer form is ignored because state lives on the editor.
+
+While the key is set, **`EnterCommand` and `WriteTextCommand`'s multi-char path call `applyAutoScrollIfActive(editor)`** after their own `scrollToCaret(RELATIVE)`. The helper reads the key, dispatches an EDT call, and applies the target. Single-char `WriteTextCommand` deliberately doesn't fire it (single chars are never `\n`); `BackspaceCommand`/`BackspaceHoldCommand` don't either, since deleting characters isn't a "line break" by the user's definition.
+
+`executeTyping` resets the key (`putUserData(SCROLL_AUTO_KEY, null)`) at the start of every run so a forgotten `{{scroll:end}}` doesn't bleed into the next session under `keepOpen=true`.
+
+Sound: the one-shot scroll plays no sound (it's a viewport pan, not a key press); auto-scroll triggered by `\n` rides along on the existing `playEnter()` from the enter/multi-char insert. `indentOwnedByIde` is intentionally not cleared by any scroll variant because nothing about the auto-indent state changes when the viewport moves.
 
 ### `{{backspace:N}}` and `{{backspace-hold:N}}` — deletion
 
@@ -276,7 +292,9 @@ games.engineroom.typewriter
     ├── Command                            # marker interface : Runnable
     ├── WriteTextCommand                   # TypedAction (single char) or insertString (multi-char) + caret.moveToOffset + scrollToCaret
     ├── MoveCaretCommand                   # caret.moveToOffset(+delta) + scrollToCaret
-    ├── CaretMoveByDirectionCommand        # caret.moveCaretRelatively(dir) — one step per command
+    ├── CaretMoveByDirectionCommand        # caret.moveCaretRelatively(dir) — one step per command, plays click sound
+    ├── ScrollCommand                       # editor.scrollingModel.scrollTo(...) — viewport pan without caret move
+    ├── SetAutoScrollCommand                # write/clear SCROLL_AUTO_KEY user data; EnterCommand + WriteTextCommand consult it on `\n`
     ├── TriggerAutocompleteCommand         # AutoPopupController.scheduleAutoPopup + sleep + dismiss
     ├── ImportCommand                      # Auto: drives Rider's Alt+Enter popup with arrow-key animation. Explicit: inserts a language-appropriate import line
     ├── PauseCommand                       # Thread.sleep

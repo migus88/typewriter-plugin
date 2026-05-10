@@ -15,6 +15,10 @@ import games.engineroom.typewriter.commands.MoveCaretCommand
 import games.engineroom.typewriter.commands.PauseCommand
 import games.engineroom.typewriter.commands.PressTabCommand
 import games.engineroom.typewriter.commands.ReformatCommand
+import games.engineroom.typewriter.commands.SCROLL_AUTO_KEY
+import games.engineroom.typewriter.commands.ScrollCommand
+import games.engineroom.typewriter.commands.ScrollTarget
+import games.engineroom.typewriter.commands.SetAutoScrollCommand
 import games.engineroom.typewriter.commands.TabCommand
 import games.engineroom.typewriter.commands.TriggerAutocompleteCommand
 import games.engineroom.typewriter.commands.WriteTextCommand
@@ -67,7 +71,7 @@ private const val SNIP_DEFAULT_DELAY_MS: Long = 200L
 val BUILT_IN_MACRO_NAMES: Set<String> = setOf(
     "pause", "reformat", "caret", "carret", "import",
     "backspace", "backspace-hold", "goto", "snip", "key", "complete", "br",
-    "select", "select-home", "select-end",
+    "select", "select-home", "select-end", "scroll",
 )
 
 /**
@@ -191,6 +195,10 @@ fun executeTyping(
     @Suppress("NAME_SHADOWING")
     val text = expandCustomMacros(text, customMacros, openingSequence, closingSequence)
     val templateRegex = """${Regex.escape(openingSequence)}(.*?)${Regex.escape(closingSequence)}""".toRegex()
+
+    // Drop any auto-scroll state left over from a previous run so it doesn't bleed across
+    // sessions when keepOpen=true. The user re-arms with `{scroll:DIR:start}` per script.
+    editor.putUserData(SCROLL_AUTO_KEY, null)
 
     // Build a "code only" view (template markers stripped) for bracket-matching.
     val concat = StringBuilder().apply {
@@ -607,6 +615,50 @@ fun executeTyping(
                     pauseAfter = pause(),
                     editor = editor,
                 )
+            }
+            // Scroll the viewport without moving the caret.
+            //
+            //   {{scroll:DIR}}       — one-shot scroll. DIR ∈ top|up, bottom|down, center|centre.
+            //   {{scroll:DIR:start}} — arm auto-scroll: every subsequent line break re-scrolls
+            //                          the viewport to DIR until it is disarmed.
+            //   {{scroll:DIR:end}}   — disarm auto-scroll (DIR is ignored — the value lives on
+            //                          the editor, not on the macro).
+            //   {{scroll:end}}       — disarm shorthand. Same effect as `{{scroll:DIR:end}}`.
+            //
+            // Unknown direction or malformed args silently no-op (consistent with the rest of
+            // the macro set).
+            "scroll" -> {
+                val firstColon = rest.indexOf(':')
+                val dirRaw: String
+                val mode: String
+                if (firstColon < 0) {
+                    dirRaw = rest.trim().lowercase()
+                    mode = ""
+                } else {
+                    dirRaw = rest.substring(0, firstColon).trim().lowercase()
+                    mode = rest.substring(firstColon + 1).trim().lowercase()
+                }
+                val target = when (dirRaw) {
+                    "top", "up" -> ScrollTarget.TOP
+                    "bottom", "down" -> ScrollTarget.BOTTOM
+                    "center", "centre" -> ScrollTarget.CENTER
+                    else -> null
+                }
+                when {
+                    // Disarm shorthand: `{{scroll:end}}` arrives here as dirRaw="end", mode="".
+                    target == null && dirRaw == "end" && mode.isEmpty() -> {
+                        commands += SetAutoScrollCommand(target = null, pauseAfter = pause(), editor = editor)
+                    }
+                    target != null && mode == "start" -> {
+                        commands += SetAutoScrollCommand(target = target, pauseAfter = pause(), editor = editor)
+                    }
+                    target != null && mode == "end" -> {
+                        commands += SetAutoScrollCommand(target = null, pauseAfter = pause(), editor = editor)
+                    }
+                    target != null && mode.isEmpty() -> {
+                        commands += ScrollCommand(target, pause(), editor)
+                    }
+                }
             }
             "complete" -> {
                 indentOwnedByIde = false

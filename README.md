@@ -46,7 +46,7 @@ Macros are inline directives wrapped in configurable markers (default `` `{ `` a
 | `` `{import:300::3}` `` | Same auto-popup flow, but animates the highlight down to the 3rd option in the submenu — each Down arrow paced like a typed character — before pressing Enter. |
 | `` `{import:UnityEngine.Color}` `` | Explicit form: bypasses the daemon and popup entirely. Inserts a language-appropriate import line (`using` / `import` / `#include` / `require` / `use`) at the top of the file, after any existing imports. |
 | `` `{import:300:UnityEngine.Color}` `` | Same explicit form with a 300 ms delay before the insertion. |
-| `` `{caret:up:3}` `` | Move the caret 3 steps in the chosen direction (`up`, `down`, `left`, `right`) at typewriter pace — one tick per step. |
+| `` `{caret:up:3}` `` | Move the caret 3 steps in the chosen direction (`up`, `down`, `left`, `right`) at typewriter pace — one tick per step, with a click sound per press. |
 | `` `{backspace:5}` `` | Press Backspace 5 times. Each press routes through the IDE's backspace action (so smart-backspace fires) with one click sound + jittered pause per press. |
 | `` `{backspace-hold:5}` `` | Imitates press-and-hold: 5 characters disappear one at a time at typing pace, but only one click sound is played (at the start) — modelling a held key, not 5 tapped presses. |
 | `` `{goto:private static}` `` | Walks the caret (arrow-key steps, click sound + typing-pace pause per step) from offset 0 forward until it lands right after the first occurrence of `private static`. Not a teleport — the viewer sees the caret crawl. Horizontal travel uses Alt+Arrow (word-skip) jumps when the next word boundary doesn't overshoot the target, falling back to single-char arrows for the final approach. |
@@ -57,6 +57,9 @@ Macros are inline directives wrapped in configurable markers (default `` `{ `` a
 | `` `{select:forward:5}` `` | Extend the selection 5 characters in the chosen direction (`forward` or `back`; `right` / `left` accepted as aliases) at typewriter pace — one Shift+Arrow press per step, click sound + jittered pause per step. Routes through the IDE's `EditorLeftWithSelection` / `EditorRightWithSelection` actions, so the selection grows or shrinks the same way it would for a real Shift+Arrow keypress. |
 | `` `{select-home}` `` | Extend the selection from the caret to the line's "home". The IDE's smart-Home action decides where home is — typically the first non-whitespace column on the first press, column 0 on the second — so the selection respects the language's indentation, not the source's. |
 | `` `{select-end}` `` | Extend the selection from the caret to the end of the current line. |
+| `` `{scroll:center}` `` | Scroll the viewport without moving the caret. `top` (alias `up`) and `bottom` (alias `down`) scroll to the start or end of the document; `center` re-centers the caret's current line in the viewport. |
+| `` `{scroll:bottom:start}` `` | Arm auto-scroll: every subsequent line break (typed `\n`, the `` `{key:enter}` `` macro, or a `\n` inside a multi-char insert) re-scrolls the viewport to the chosen target. Same direction set as `{scroll:DIR}` — `top`/`up`, `bottom`/`down`, `center`/`centre`. Useful when typing into a long file and you want the cursor to stay glued to one corner of the viewport. |
+| `` `{scroll:end}` `` | Disarm auto-scroll. Subsequent line breaks no longer move the viewport. `` `{scroll:DIR:end}` `` is accepted too (the direction is ignored — the auto-scroll state lives on the editor, not the macro). Auto-scroll also auto-resets at the start of each typing run, so a script that forgets to disarm doesn't leak across runs. |
 
 The marker tokens (default `` `{ `` / `` }` ``) are configurable in **Settings** and update live in the macro list and the macro highlighter.
 
@@ -69,7 +72,7 @@ Click **Edit** at the bottom of the macro list to open a popup that manages your
 - **Language** scopes the macro to one file type. Choose `All languages` (the default) and the macro shows up in every tab's macro list and completion popup; pick a specific language (e.g. C#, Kotlin) and it only appears when the active tab matches. The content editor itself swaps to that language so you get matching syntax highlighting and word-completion while editing the macro body.
 - Content is plain text and can itself contain other macros — built-in (`` `{pause:500}` ``, `` `{complete:3:Word}` ``, …) or other custom names. Expansion is recursive with cycle protection, so a custom macro that references itself (or two macros that reference each other) won't loop forever.
 - The content editor uses the same auto-completion as the script tabs: type the opening marker to get a popup of every built-in and (language-matching) custom macro, or type two identifier characters to get word completion.
-- The macro **name** can't collide with built-in macros (`pause`, `reformat`, `complete`, `import`, `caret`, `backspace`, `backspace-hold`, `goto`, `snip`, `key`, `br`, `select`, `select-home`, `select-end`), can't contain whitespace or `:`, and must be unique across all languages.
+- The macro **name** can't collide with built-in macros (`pause`, `reformat`, `complete`, `import`, `caret`, `backspace`, `backspace-hold`, `goto`, `snip`, `key`, `br`, `select`, `select-home`, `select-end`, `scroll`), can't contain whitespace or `:`, and must be unique across all languages.
 - Definitions persist across IDE restarts.
 
 ## Enrichment
