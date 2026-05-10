@@ -135,6 +135,9 @@ class CustomMacrosDialog(
 
     private fun createContentEditor(): EditorTextField {
         val virtualFile = LightVirtualFile("custom_macro.txt", PlainTextFileType.INSTANCE, "")
+        // Same gate the dialog editors use — without it, TypewriterCompletionContributor bails
+        // out before suggesting macros / words inside the macro body.
+        virtualFile.putUserData(TYPEWRITER_DIALOG_FILE_KEY, true)
         val document = FileDocumentManager.getInstance().getDocument(virtualFile)
             ?: EditorFactory.getInstance().createDocument("")
         return EditorTextField(document, project, PlainTextFileType.INSTANCE, false, false).apply {
@@ -145,6 +148,7 @@ class CustomMacrosDialog(
                 editor.settings.additionalLinesCount = 0
                 editor.settings.isCaretRowShown = true
                 editor.setVerticalScrollbarVisible(true)
+                installTypewriterAutoPopupTrigger(editor, project, disposable) { openingSequence }
                 MacroHighlighter(
                     editor,
                     disposable,

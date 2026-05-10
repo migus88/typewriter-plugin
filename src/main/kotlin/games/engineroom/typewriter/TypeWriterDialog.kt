@@ -1,22 +1,18 @@
 package games.engineroom.typewriter
 
 import games.engineroom.typewriter.TypeWriterBundle.message
-import com.intellij.codeInsight.AutoPopupController
 import com.intellij.codeInsight.lookup.LookupManager
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.actionSystem.CustomShortcutSet
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.EditorFactory
-import com.intellij.openapi.editor.event.DocumentEvent
-import com.intellij.openapi.editor.event.DocumentListener
 import com.intellij.openapi.util.TextRange
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileEditorManager
@@ -420,7 +416,7 @@ class TypeWriterDialog(private val project: Project) :
                 editor.setVerticalScrollbarVisible(true)
                 editor.setHorizontalScrollbarVisible(true)
                 installPlainEnterHandler(editor)
-                installAutoPopupTrigger(editor)
+                installTypewriterAutoPopupTrigger(editor, project, disposable) { openingSequence }
                 macroHighlighters += MacroHighlighter(
                     editor,
                     disposable,
@@ -431,57 +427,6 @@ class TypeWriterDialog(private val project: Project) :
                 )
             }
         }
-    }
-
-    /**
-     * Schedule the IDE's completion auto-popup ([AutoPopupController]) when the user types
-     * either the closing character of the configured opening marker (so macro suggestions appear
-     * the moment they open `` `{ ``) or the second consecutive identifier character (so word /
-     * keyword completion behaves like the IDE editors).
-     *
-     * [TypewriterCompletionContributor] decides what the popup actually contains; this listener
-     * just decides *when* to schedule it. The single-char filter (`newLength == 1 &&
-     * oldLength == 0`) excludes programmatic mutations — Enrich/Clear macros, plain-Enter inserts,
-     * macro-list inserts via [insertMacro], and lookup-accept replacements are all multi-char or
-     * have non-zero `oldLength`.
-     */
-    private fun installAutoPopupTrigger(editor: Editor) {
-        editor.document.addDocumentListener(object : DocumentListener {
-            override fun documentChanged(event: DocumentEvent) {
-                if (event.newLength != 1 || event.oldLength != 0) return
-
-                val typed = event.newFragment[0]
-                val docText = event.document.charsSequence
-                val caretAfter = event.offset + 1
-
-                val open = openingSequence
-                val openLast = open.lastOrNull()
-                val justClosedOpener = openLast != null &&
-                    typed == openLast &&
-                    caretAfter >= open.length &&
-                    matchesAt(docText, open, caretAfter - open.length)
-
-                val prev = if (event.offset > 0) docText[event.offset - 1] else ' '
-                val isSecondIdentChar = isIdentifierChar(typed) && isIdentifierChar(prev)
-
-                if (justClosedOpener || isSecondIdentChar) {
-                    ApplicationManager.getApplication().invokeLater {
-                        if (project.isDisposed) return@invokeLater
-                        AutoPopupController.getInstance(project).scheduleAutoPopup(editor)
-                    }
-                }
-            }
-
-            private fun matchesAt(text: CharSequence, marker: String, offset: Int): Boolean {
-                for (j in marker.indices) {
-                    if (text[offset + j] != marker[j]) return false
-                }
-                return true
-            }
-
-            private fun isIdentifierChar(c: Char): Boolean =
-                c.isLetterOrDigit() || c == '_'
-        }, disposable)
     }
 
     /**
