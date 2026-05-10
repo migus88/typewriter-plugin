@@ -408,20 +408,23 @@ class TypeWriterDialog(private val project: Project) :
             border = JBUI.Borders.customLine(com.intellij.ui.JBColor.border(), 1)
             viewport.background = macroList.background
         }
-        // Match the macros-header buttons' height to the tab strip's natural height so the two
-        // header rows line up across the splitter.
+        // Match the row buttons' height to the tab strip's natural height so the column header
+        // and footer line up vertically with the tabs across the splitter.
         val tabH = JBUI.scale(30)
         listOf(enrichButton, clearMacrosButton, customMacrosButton).forEach {
             it.preferredSize = Dimension(it.preferredSize.width, tabH)
             it.margin = JBUI.insets(0, 12)
         }
-        val macroHeader = JPanel(FlowLayout(FlowLayout.LEFT, JBUI.scale(4), 0)).apply {
+        // The "Edit" button sits at the bottom of the macro column — it edits the user's custom
+        // macros, which appear at the bottom of the list. Putting the action close to the things
+        // it acts on keeps the spatial mapping obvious.
+        val macroFooter = JPanel(FlowLayout(FlowLayout.LEFT, JBUI.scale(4), 0)).apply {
             add(customMacrosButton)
         }
         val macroColumn = JPanel(BorderLayout(0, 0)).apply {
             preferredSize = JBUI.size(240, 0)
-            add(macroHeader, BorderLayout.NORTH)
             add(macroScroll, BorderLayout.CENTER)
+            add(macroFooter, BorderLayout.SOUTH)
         }
 
         // Tab strip lives in the NORTH; horizontal scroll bar appears under the strip when tabs
