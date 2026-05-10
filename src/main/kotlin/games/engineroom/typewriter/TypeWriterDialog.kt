@@ -416,8 +416,6 @@ class TypeWriterDialog(private val project: Project) :
             it.margin = JBUI.insets(0, 12)
         }
         val macroHeader = JPanel(FlowLayout(FlowLayout.LEFT, JBUI.scale(4), 0)).apply {
-            add(enrichButton)
-            add(clearMacrosButton)
             add(customMacrosButton)
         }
         val macroColumn = JPanel(BorderLayout(0, 0)).apply {
@@ -461,9 +459,20 @@ class TypeWriterDialog(private val project: Project) :
         // checkbox baseline with the Start button without piling on extra padding. Equal left/
         // right insets match the default south panel's natural horizontal margin.
         keepOpenCheckBox.border = JBUI.Borders.emptyLeft(12)
+        // Enrich + Clear macros sit immediately to the left of the Start button — they're
+        // pre-typing transforms on the active tab, so visually they belong on the action bar.
+        // FlowLayout.RIGHT inside the BorderLayout.CENTER pushes them up against the EAST cell
+        // (which holds the Start button), so they appear right next to it regardless of window
+        // width.
+        val extras = JPanel(FlowLayout(FlowLayout.RIGHT, JBUI.scale(4), 0)).apply {
+            isOpaque = false
+            add(enrichButton)
+            add(clearMacrosButton)
+        }
         return JPanel(BorderLayout()).apply {
             add(keepOpenCheckBox, BorderLayout.WEST)
-            add(defaultSouth, BorderLayout.CENTER)
+            add(extras, BorderLayout.CENTER)
+            add(defaultSouth, BorderLayout.EAST)
         }
     }
 
