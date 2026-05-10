@@ -15,7 +15,7 @@ Hit <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd> (or <kbd>Ctrl</kbd>+<kbd>Shift<
 ## Authoring
 
 - **Real code editor**, backed by a `LightVirtualFile` so the script gets the same PSI-driven services your normal editor does.
-- **Tabs.** Keep multiple scripts ready at once. The tab strip is a single row that scrolls horizontally when there are more tabs than fit — a scroll bar appears under the strip rather than collapsing into a dropdown. Click the **+** in the top toolbar to add a tab, double-click a tab to rename, click the **×** on a tab to close it (always visible — no hover-to-reveal). Each tab has its own text and language. Tabs and their contents persist across IDE restarts.
+- **Tabs.** Keep multiple scripts ready at once. The tab strip is a single row that scrolls horizontally when there are more tabs than fit — a scroll bar appears under the strip rather than collapsing into a dropdown. Click the **+** at the right end of the tabs row to add a tab, double-click a tab to rename, click the **×** on a tab to close it (always visible — no hover-to-reveal). Each tab has its own text and language. Tabs and their contents persist across IDE restarts.
 - **Per-tab language picker.** Switching languages re-spins the underlying `LightVirtualFile` so the highlighter follows along without losing your text.
 - **Non-modal dialog.** Park it on a second screen while typing plays in your code editor. The active editor is captured at "Start" time, not when the action fires, so you can re-focus the IDE first.
 - **Macro syntax highlighting** layers a configurable colour over `` `{ … }` `` macro spans inside your scripts, with a separate colour for the colon-separated arguments after the macro name. Both colours are live-editable in **Settings**.

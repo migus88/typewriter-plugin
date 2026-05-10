@@ -389,15 +389,12 @@ class TypeWriterDialog(private val project: Project) :
         val comboH = languageCombo.preferredSize.height
         val sq = Dimension(comboH, comboH)
         settingsButton.preferredSize = sq
-        plusButton.preferredSize = sq
-        val rightTools = JPanel(FlowLayout(FlowLayout.RIGHT, JBUI.scale(4), 0)).apply {
-            isOpaque = false
-            add(plusButton)
-            add(settingsButton)
-        }
+        // The + button sits on the tabs row (see below) — sized to the tab strip's height so the
+        // two visually align. Settings stays on the language-combo toolbar.
+        plusButton.preferredSize = JBUI.size(comboH.coerceAtMost(TAB_ROW_HEIGHT), TAB_ROW_HEIGHT)
         val toolbar = JPanel(BorderLayout(JBUI.scale(4), 0)).apply {
             add(languageCombo, BorderLayout.CENTER)
-            add(rightTools, BorderLayout.EAST)
+            add(settingsButton, BorderLayout.EAST)
         }
 
         val macroScroll = JBScrollPane(
@@ -427,10 +424,22 @@ class TypeWriterDialog(private val project: Project) :
             add(macroFooter, BorderLayout.SOUTH)
         }
 
-        // Tab strip lives in the NORTH; horizontal scroll bar appears under the strip when tabs
-        // overflow. The active tab's editor fills CENTER via CardLayout swap.
+        // Tab strip + plus button share one row at the top. The strip fills the remaining width
+        // (CENTER) and the plus button anchors at EAST — that way the strip's horizontal scroll
+        // bar belongs to the tabs alone, never extending under the plus button. The plus is
+        // wrapped so it pins to the top of the row instead of stretching vertically with the
+        // scrollbar gutter. Below it, the active tab's editor fills CENTER via CardLayout swap.
+        val plusWrap = JPanel(BorderLayout()).apply {
+            isOpaque = false
+            add(plusButton, BorderLayout.NORTH)
+        }
+        val tabsRow = JPanel(BorderLayout()).apply {
+            add(tabScroll, BorderLayout.CENTER)
+            add(plusWrap, BorderLayout.EAST)
+            preferredSize = JBUI.size(0, TAB_ROW_HEIGHT + SCROLLBAR_HEIGHT)
+        }
         val tabsPanel = JPanel(BorderLayout()).apply {
-            add(tabScroll, BorderLayout.NORTH)
+            add(tabsRow, BorderLayout.NORTH)
             add(tabContent, BorderLayout.CENTER)
         }
 
