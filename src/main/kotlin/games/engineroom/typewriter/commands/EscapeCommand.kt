@@ -4,6 +4,7 @@ import com.intellij.codeInsight.AutoPopupController
 import com.intellij.codeInsight.lookup.LookupManager
 import com.intellij.ide.IdeEventQueue
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.wm.IdeFocusManager
 import games.engineroom.typewriter.KeyboardSoundService
@@ -33,7 +34,10 @@ class EscapeCommand(
 ) : Command {
     override fun run() {
         KeyboardSoundService.get().playKey()
-        ApplicationManager.getApplication().invokeAndWait {
+        // ModalityState.any() so Esc still dispatches when a modal dialog is open — default
+        // modality from a background thread is non-modal and would hold this runnable until
+        // every modal closes (defeating the whole point of pressing Esc to dismiss them).
+        ApplicationManager.getApplication().invokeAndWait({
             val project = editor.project
             if (project != null) {
                 AutoPopupController.getInstance(project).cancelAllRequests()
@@ -57,7 +61,7 @@ class EscapeCommand(
                     KeyEvent.VK_ESCAPE, '', KeyEvent.KEY_LOCATION_STANDARD,
                 ),
             )
-        }
+        }, ModalityState.any())
         Thread.sleep(pauseAfter.toLong())
     }
 }

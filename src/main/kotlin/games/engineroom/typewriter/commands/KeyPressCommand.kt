@@ -3,6 +3,7 @@ package games.engineroom.typewriter.commands
 import com.intellij.codeInsight.lookup.LookupManager
 import com.intellij.ide.IdeEventQueue
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.wm.IdeFocusManager
 import com.intellij.psi.PsiDocumentManager
@@ -39,7 +40,12 @@ class KeyPressCommand(
         } else {
             KeyboardSoundService.get().playKey()
         }
-        ApplicationManager.getApplication().invokeAndWait {
+        // ModalityState.any() so the runnable fires even when a modal dialog is open
+        // (e.g. Rider's "Generate" / "Implement missing members"). Default modality from a
+        // background thread is non-modal, which holds the runnable until every modal closes —
+        // the symptom is "sound plays, no key dispatched, typewriter wedges until the user
+        // dismisses the dialog manually". Posting AWT key events is safe under any modality.
+        ApplicationManager.getApplication().invokeAndWait({
             if (forceEditorFocus) {
                 val project = editor.project
                 if (project != null) {
@@ -69,7 +75,7 @@ class KeyPressCommand(
                     keyCode, keyChar, KeyEvent.KEY_LOCATION_STANDARD,
                 ),
             )
-        }
+        }, ModalityState.any())
         Thread.sleep(pauseAfter.toLong())
     }
 }
