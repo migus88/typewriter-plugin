@@ -47,6 +47,7 @@ import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Font
 import java.awt.FontMetrics
+import java.awt.Point
 import java.awt.event.ActionEvent
 import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
@@ -59,6 +60,7 @@ import javax.swing.JCheckBox
 import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.JPanel
+import javax.swing.JTextField
 import javax.swing.KeyStroke
 import javax.swing.ListCellRenderer
 import javax.swing.ListSelectionModel
@@ -365,17 +367,13 @@ class TypeWriterDialog(private val project: Project) :
         )
 
     private fun renameTab(state: TabState) {
-        // Use the parent-component overload (not the project one) so the popup centers on the
-        // typewriter dialog rather than on the IDE frame — matches how SettingsDialog and
-        // CustomMacrosDialog place themselves over the parent window.
-        val newName = Messages.showInputDialog(
-            dialogPanel,
-            message("dialog.rename.tab.prompt"),
-            message("dialog.rename.tab.title"),
-            null,
-            state.name,
-            null,
-        )?.trim().orEmpty()
+        // `Messages.showInputDialog(component, …)` accepts a parent component but still places the
+        // popup on the IDE frame's centre — there's no hook to override the location. Use a
+        // small purpose-built DialogWrapper that honours `getInitialLocation()`, mirroring how
+        // SettingsDialog and CustomMacrosDialog land on top of the typewriter window.
+        val dialog = RenameTabDialog(project, dialogPanel, state.name)
+        if (!dialog.showAndGet()) return
+        val newName = dialog.newName.trim()
         if (newName.isEmpty()) return
         state.name = newName
         state.button?.setTitle(newName)
@@ -1149,5 +1147,46 @@ class TypeWriterDialog(private val project: Project) :
             "EditorTabs.underlinedTabForeground",
             com.intellij.util.ui.UIUtil.getListSelectionForeground(true),
         )
+    }
+}
+
+/**
+ * Tab rename popup. `Messages.showInputDialog(component, …)` ignores the parent for placement and
+ * always lands on the IDE frame; this DialogWrapper subclass exists solely so we can override
+ * [getInitialLocation] and pin the popup over the typewriter dialog instead — same approach
+ * SettingsDialog and CustomMacrosDialog use.
+ */
+private class RenameTabDialog(
+    project: Project,
+    private val parentComponent: Component,
+    initialName: String,
+) : DialogWrapper(project, parentComponent, true, IdeModalityType.IDE) {
+
+    private val nameField: JTextField = JTextField(initialName).apply {
+        selectAll()
+    }
+
+    val newName: String get() = nameField.text
+
+    init {
+        title = TypeWriterBundle.message("dialog.rename.tab.title")
+        init()
+    }
+
+    override fun createCenterPanel(): JComponent =
+        JPanel(BorderLayout(0, JBUI.scale(6))).apply {
+            preferredSize = JBUI.size(280, 60)
+            add(JLabel(TypeWriterBundle.message("dialog.rename.tab.prompt")), BorderLayout.NORTH)
+            add(nameField, BorderLayout.CENTER)
+        }
+
+    override fun getPreferredFocusedComponent(): JComponent = nameField
+
+    override fun getInitialLocation(): Point? {
+        val parentWindow = SwingUtilities.getWindowAncestor(parentComponent) ?: return null
+        val pref = preferredSize ?: return null
+        val x = parentWindow.x + (parentWindow.width - pref.width) / 2
+        val y = parentWindow.y + (parentWindow.height - pref.height) / 2
+        return Point(x.coerceAtLeast(0), y.coerceAtLeast(0))
     }
 }
