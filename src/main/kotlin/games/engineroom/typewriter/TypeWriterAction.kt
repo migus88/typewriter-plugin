@@ -60,6 +60,10 @@ class TypeWriterAction : DumbAwareAction() {
 private val OPEN_TO_CLOSE = mapOf('{' to '}', '(' to ')', '[' to ']')
 private val CLOSE_TO_OPEN = OPEN_TO_CLOSE.entries.associate { (k, v) -> v to k }
 
+/** Chars the IDE will auto-pair when typed via TypedAction — the `complete` tail-absorber
+ *  must not swallow them, since absorbed chars land via insertString and bypass auto-pair. */
+private val BRACKET_OR_QUOTE_OPENERS: Set<Char> = setOf('(', '[', '{', '"', '\'')
+
 /** Default pause between typing a snippet abbreviation and pressing Tab to expand it. */
 private const val SNIP_DEFAULT_DELAY_MS: Long = 200L
 
@@ -201,10 +205,21 @@ fun executeTyping(
     editor.putUserData(SCROLL_AUTO_KEY, null)
 
     // Build a "code only" view (template markers stripped) for bracket-matching.
+    //
+    // `{complete:N:Word}` templates substitute their `Word` into this view rather than stripping
+    // to empty — the chars they actually type need to be present so the bracket matcher sees the
+    // real shape of the code. Without this, e.g. `GetColor(`{complete:3:string}` name)` produces
+    // a code-only view of `GetColor( name)` and the `(` pair gets a spurious leading-whitespace
+    // chunk that the auto-pair sequencer types out, yielding `GetColor( string name)`.
     val concat = StringBuilder().apply {
         var lastEnd = 0
         for (m in templateRegex.findAll(text)) {
             append(text, lastEnd, m.range.first)
+            val body = m.value
+                .substringAfter(openingSequence)
+                .substringBeforeLast(closingSequence)
+            val word = completeWordFromBody(body)
+            if (word != null) append(word)
             lastEnd = m.range.last + 1
         }
         append(text, lastEnd, text.length)
@@ -686,6 +701,10 @@ fun executeTyping(
                         templateDelay = completionDelay
                         word = afterN
                     }
+                    // The code-only view substituted `word` for this template's marker, so advance
+                    // past those positions in the classification map. Must stay in sync with
+                    // [completeWordFromBody] / the concat builder above.
+                    concatPos += word.length
                     if (word.isNotEmpty()) {
                         val effectiveN = n.coerceIn(0, word.length)
                         val prefix = word.substring(0, effectiveN)
@@ -711,8 +730,19 @@ fun executeTyping(
                         // opening marker — doing so makes `lastEnd` jump past `m.range.first` of
                         // the next match, and the next iteration's `text.substring(lastEnd, ...)`
                         // throws StringIndexOutOfBoundsException on the EDT, freezing the dialog.
+                        //
+                        // Also don't absorb it if it's a bracket/quote opener (`(`, `[`, `{`, `"`,
+                        // `'`). Absorbed chars land in the doc through `Document.insertString` as
+                        // part of the multi-char tail insert, which bypasses the IDE's auto-pair
+                        // (only single-char TypedAction triggers it). The classifier *does* see
+                        // the source closer as `SkipChar`, so without the auto-paired closer the
+                        // walker emits a `MoveCaret(+1)` past a character that doesn't exist —
+                        // shoving the caret onto the next line. Symptom in the wild:
+                        // `\`{complete:3:return}\` "Default";` rendering as `return Default\n;`
+                        // (no quotes, stray newline).
                         if (wsLen > 0 && idx < text.length && !text[idx].isWhitespace() &&
-                            !text.regionMatches(idx, openingSequence, 0, openingSequence.length)
+                            !text.regionMatches(idx, openingSequence, 0, openingSequence.length) &&
+                            text[idx] !in BRACKET_OR_QUOTE_OPENERS
                         ) {
                             sb.append(text[idx])
                             idx++
@@ -743,6 +773,25 @@ fun executeTyping(
     appendSegment(text.substring(lastEnd))
 
     scheduler.start(commands, onDone)
+}
+
+/**
+ * Extract the `Word` from a `{complete:N:Word}` (or `{complete:N:DELAY:Word}`) template body —
+ * everything else returns null. Used by the code-only view builder to substitute the typed-out
+ * word into the bracket-matcher's input. Mirrors the parsing in the `complete` handler so they
+ * stay in lock-step (any change to one belongs in the other).
+ */
+private fun completeWordFromBody(body: String): String? {
+    val firstColon = body.indexOf(':')
+    if (firstColon < 0) return null
+    val name = body.substring(0, firstColon).trim()
+    if (name != "complete") return null
+    val rest = body.substring(firstColon + 1)
+    val secondColon = rest.indexOf(':')
+    if (secondColon <= 0) return null
+    val afterN = rest.substring(secondColon + 1)
+    val delayMatch = Regex("^(\\d+):").find(afterN)
+    return if (delayMatch != null) afterN.substring(delayMatch.range.last + 1) else afterN
 }
 
 private fun parseCaretDirection(s: String): CaretDirection? = when (s) {

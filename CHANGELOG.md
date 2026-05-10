@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- Two `{{complete}}`-related bugs that surfaced together in scripts like `GetColor(\`{complete:3:string}\` name)` and `\`{complete:3:return}\` "Default";`. The bracket matcher operated on a code-only view with templates stripped to empty, so `(` was followed by literal source whitespace and got an erroneous leading-whitespace chunk — typing `( string name)` instead of `(string name)`. Fixed by substituting each `{{complete:N:Word}}`'s `Word` into the code-only view (and advancing `concatPos` past it). Separately, the tail-absorber would swallow a quote/bracket opener immediately after the template into a multi-char `insertString`, bypassing the IDE's auto-pair — leaving the source's matching closer classified as `SkipChar` with nothing to step over, producing `return Default\n;` (no quotes, stray newline). Fixed by skipping absorption when the boundary char is `(`, `[`, `{`, `"`, or `'` so the opener types via `TypedAction` and the IDE auto-pair fires.
+
 ## 0.9.0
 
 ### Added
